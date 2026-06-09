@@ -1,12 +1,15 @@
 use crate::common::Range;
+use serde::{Serialize, Deserialize};
 
 #[derive(Debug)]
+#[derive(Serialize, Deserialize)]
 pub enum SpeciesKind {
     Named,
     Generic,
 }
 
 #[derive(Debug)]
+#[derive(Serialize, Deserialize)]
 pub enum LifeBasis {
     Carbon,
     Silicon,
@@ -17,6 +20,7 @@ pub enum LifeBasis {
 }
 
 #[derive(Debug)]
+#[derive(Serialize, Deserialize)]
 pub enum Solvent {
     Water,
     Ammonia,
@@ -29,6 +33,7 @@ pub enum Solvent {
 }
 
 #[derive(Debug)]
+#[derive(Serialize, Deserialize)]
 pub enum AtmosphereTag {
     Oxygen,
     Nitrogen,
@@ -40,6 +45,7 @@ pub enum AtmosphereTag {
 }
 
 #[derive(Debug)]
+#[derive(Serialize, Deserialize)]
 pub enum AtmosphereRelationship {
     Required,
     Beneficial,
@@ -49,6 +55,7 @@ pub enum AtmosphereRelationship {
 }
 
 #[derive(Debug)]
+#[derive(Serialize, Deserialize)]
 pub enum RespirationMedium {
     Gas,
     Liquid,
@@ -57,6 +64,7 @@ pub enum RespirationMedium {
 }
 
 #[derive(Debug)]
+#[derive(Serialize, Deserialize)]
 pub struct AtmosphereAffinity {
     pub tag: Option<AtmosphereTag>,
     pub relationship: AtmosphereRelationship,
@@ -64,6 +72,7 @@ pub struct AtmosphereAffinity {
 }
 
 #[derive(Debug)]
+#[derive(Serialize, Deserialize)]
 pub enum FoodTag {
     Herbivorous,
     Carnivorous,
@@ -73,6 +82,7 @@ pub enum FoodTag {
 }
 
 #[derive(Debug)]
+#[derive(Serialize, Deserialize)]
 pub struct Species {
     pub name: Option<String>,
     pub kind: SpeciesKind,

@@ -2,6 +2,8 @@
 
 mod common;
 mod bio;
+mod data;
+
 
 fn main() {
 
@@ -56,5 +58,14 @@ fn main() {
         grav_range: Some(common::Range { min: 0.35, max: 2.25 })
     };
 
-    println!("{:#?}", my_species);
+    let species_list_to_write = vec![my_species];
+
+    data::write_db("core.db", species_list_to_write);
+    
+    let species_list_to_read = data::read_db("core.db");
+
+    for species in species_list_to_read {
+        println!("{:#?}", species);
+    }
+
 }
