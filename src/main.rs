@@ -5,7 +5,7 @@ mod bio;
 
 fn main() {
 
-    let my_species: bio::Species = bio::Species {
+    let my_species = bio::Species {
         name: Some(String::from("Human")),
         kind: bio::SpeciesKind::Named,
         basis: bio::LifeBasis::Carbon,
@@ -56,5 +56,5 @@ fn main() {
         grav_range: Some(common::Range { min: 0.35, max: 2.25 })
     };
 
-    println!("Hello, world!");
+    println!("{:#?}", my_species);
 }
