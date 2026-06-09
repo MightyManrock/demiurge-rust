@@ -40,6 +40,7 @@ pub enum AtmosphereRelationship {
     Toxic
 }
 
+
 pub enum RespirationMedium {
     Gas,
     Liquid,
@@ -47,12 +48,18 @@ pub enum RespirationMedium {
     Vacuum,
 }
 
+pub struct AtmosphereAffinity {
+    pub tag: AtmosphereTag,
+    pub relationship: AtmosphereRelationship,
+    pub medium: RespirationMedium,
+}
+
 pub enum FoodTag {
     Herbivorous,
     Carnivorous,
-    Photosynethic,
+    Photosynthetic,
     Chemosynthetic,
-    Lithotropic,
+    Lithotrophic,
 }
 
 pub struct Range<T> {
@@ -61,9 +68,11 @@ pub struct Range<T> {
 }
 
 pub struct Species {
-    pub species_kind: SpeciesKind,
+    pub name: Option<String>,
+    pub kind: SpeciesKind,
     pub life_basis: LifeBasis,
     pub solvent: Solvent,
+    pub atmo_aff: Vec<AtmosphereAffinity>,
 }
 
 fn main() {
