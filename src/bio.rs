@@ -1,10 +1,12 @@
 use crate::common::Range;
 
+#[derive(Debug)]
 pub enum SpeciesKind {
     Named,
     Generic,
 }
 
+#[derive(Debug)]
 pub enum LifeBasis {
     Carbon,
     Silicon,
@@ -14,6 +16,7 @@ pub enum LifeBasis {
     Phosphorus,
 }
 
+#[derive(Debug)]
 pub enum Solvent {
     Water,
     Ammonia,
@@ -25,6 +28,7 @@ pub enum Solvent {
     Formamide,
 }
 
+#[derive(Debug)]
 pub enum AtmosphereTag {
     Oxygen,
     Nitrogen,
@@ -35,6 +39,7 @@ pub enum AtmosphereTag {
     Sulfate,
 }
 
+#[derive(Debug)]
 pub enum AtmosphereRelationship {
     Required,
     Beneficial,
@@ -43,6 +48,7 @@ pub enum AtmosphereRelationship {
     Fatal,
 }
 
+#[derive(Debug)]
 pub enum RespirationMedium {
     Gas,
     Liquid,
@@ -50,12 +56,14 @@ pub enum RespirationMedium {
     Vacuum,
 }
 
+#[derive(Debug)]
 pub struct AtmosphereAffinity {
     pub tag: Option<AtmosphereTag>,
     pub relationship: AtmosphereRelationship,
     pub medium: RespirationMedium,
 }
 
+#[derive(Debug)]
 pub enum FoodTag {
     Herbivorous,
     Carnivorous,
@@ -64,6 +72,7 @@ pub enum FoodTag {
     Lithotrophic,
 }
 
+#[derive(Debug)]
 pub struct Species {
     pub name: Option<String>,
     pub kind: SpeciesKind,
