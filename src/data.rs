@@ -2,6 +2,7 @@ use crate::bio;
 
 use rusqlite::Connection;
 use serde_json;
+use uuid::Uuid;
 
 fn write_species(conn: &Connection, species_list: Vec<bio::Species>) {
 
@@ -25,7 +26,7 @@ fn write_species(conn: &Connection, species_list: Vec<bio::Species>) {
             "INSERT INTO species (id, name, kind, basis, solvent, atmo_aff, food_tag, temp_range, press_range, grav_range)
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             rusqlite::params![
-                serde_json::to_string(&species.id).unwrap(),
+                species.id.to_string(),
                 species.name,
                 serde_json::to_string(&species.kind).unwrap(),
                 serde_json::to_string(&species.basis).unwrap(),
@@ -55,12 +56,12 @@ pub(crate) fn read_db(path: &str) -> Vec<bio::Species> {
     let conn = Connection::open(path).unwrap();
 
     let mut stmt = conn.prepare(
-        "SELECT name, kind, basis, solvent, atmo_aff, food_tag, temp_range, press_range, grav_range FROM species"
+        "SELECT id, name, kind, basis, solvent, atmo_aff, food_tag, temp_range, press_range, grav_range FROM species"
     ).unwrap();
 
     let species_list: Vec<bio::Species> = stmt.query_map([], |row| {
         Ok(bio::Species {
-            id: serde_json::from_str(&row.get::<_, String>(0)?).unwrap(),
+            id: row.get::<_, String>(0)?.parse::<Uuid>().unwrap(),
             name: row.get(1)?,
             kind: serde_json::from_str(&row.get::<_, String>(2)?).unwrap(),
             basis: serde_json::from_str(&row.get::<_, String>(3)?).unwrap(),
