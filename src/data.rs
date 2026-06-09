@@ -50,7 +50,7 @@ pub(crate) fn write_db(path: &str, species_list: Vec<bio::Species>) {
 }
 
 pub(crate) fn read_db(path: &str) -> Vec<bio::Species> {
-    
+
     let conn = Connection::open(path).unwrap();
 
     let mut stmt = conn.prepare(
@@ -73,5 +73,5 @@ pub(crate) fn read_db(path: &str) -> Vec<bio::Species> {
         .map(|s| s.unwrap())
         .collect();
 
-    return species_list;
+    species_list
 }

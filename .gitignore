@@ -24,3 +24,5 @@ target
 CLAUDE.md
 
 .vscode
+
+core.db
