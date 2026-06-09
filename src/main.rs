@@ -24,7 +24,7 @@ pub enum Solvent {
 }
 
 pub enum AtmosphereTag {
-    Oyxgen,
+    Oxygen,
     Nitrogen,
     CarbonMonoxide,
     CarbonDioxide,
@@ -45,6 +45,25 @@ pub enum RespirationMedium {
     Liquid,
     Solid,
     Vacuum,
+}
+
+pub enum FoodTag {
+    Herbivorous,
+    Carnivorous,
+    Photosynethic,
+    Chemosynthetic,
+    Lithotropic,
+}
+
+pub struct Range<T> {
+    pub min: T,
+    pub max: T,
+}
+
+pub struct Species {
+    pub species_kind: SpeciesKind,
+    pub life_basis: LifeBasis,
+    pub solvent: Solvent,
 }
 
 fn main() {
