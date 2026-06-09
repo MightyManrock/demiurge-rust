@@ -1,5 +1,6 @@
 use crate::common::Range;
 use serde::{Serialize, Deserialize};
+use uuid::Uuid;
 
 #[derive(Debug)]
 #[derive(Serialize, Deserialize)]
@@ -84,6 +85,7 @@ pub enum FoodTag {
 #[derive(Debug)]
 #[derive(Serialize, Deserialize)]
 pub struct Species {
+    pub id: Uuid,
     pub name: Option<String>,
     pub kind: SpeciesKind,
     pub basis: LifeBasis,

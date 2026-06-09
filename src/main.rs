@@ -4,10 +4,12 @@ mod common;
 mod bio;
 mod data;
 
+use uuid::Uuid;
 
 fn main() {
 
     let my_species = bio::Species {
+        id: Uuid::new_v4(),
         name: Some(String::from("Human")),
         kind: bio::SpeciesKind::Named,
         basis: bio::LifeBasis::Carbon,

@@ -7,7 +7,7 @@ fn write_species(conn: &Connection, species_list: Vec<bio::Species>) {
 
     conn.execute_batch("
       CREATE TABLE IF NOT EXISTS species (
-          id          INTEGER PRIMARY KEY,
+          id          TEXT PRIMARY KEY,
           name        TEXT,
           kind        TEXT NOT NULL,
           basis       TEXT NOT NULL,
@@ -22,9 +22,10 @@ fn write_species(conn: &Connection, species_list: Vec<bio::Species>) {
 
     for species in species_list {
         conn.execute(
-            "INSERT INTO species (name, kind, basis, solvent, atmo_aff, food_tag, temp_range, press_range, grav_range)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            "INSERT INTO species (id, name, kind, basis, solvent, atmo_aff, food_tag, temp_range, press_range, grav_range)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             rusqlite::params![
+                serde_json::to_string(&species.id).unwrap(),
                 species.name,
                 serde_json::to_string(&species.kind).unwrap(),
                 serde_json::to_string(&species.basis).unwrap(),
@@ -59,15 +60,16 @@ pub(crate) fn read_db(path: &str) -> Vec<bio::Species> {
 
     let species_list: Vec<bio::Species> = stmt.query_map([], |row| {
         Ok(bio::Species {
-            name: row.get(0)?,
-            kind: serde_json::from_str(&row.get::<_, String>(1)?).unwrap(),
-            basis: serde_json::from_str(&row.get::<_, String>(2)?).unwrap(),
-            solvent: serde_json::from_str(&row.get::<_, String>(3)?).unwrap(),
-            atmo_aff: serde_json::from_str(&row.get::<_, String>(4)?).unwrap(),
-            food_tag: serde_json::from_str(&row.get::<_, String>(5)?).unwrap(),
-            temp_range: serde_json::from_str(&row.get::<_, String>(6)?).unwrap(),
-            press_range: serde_json::from_str(&row.get::<_, String>(7)?).unwrap(),
-            grav_range: serde_json::from_str(&row.get::<_, String>(8)?).unwrap(),
+            id: serde_json::from_str(&row.get::<_, String>(0)?).unwrap(),
+            name: row.get(1)?,
+            kind: serde_json::from_str(&row.get::<_, String>(2)?).unwrap(),
+            basis: serde_json::from_str(&row.get::<_, String>(3)?).unwrap(),
+            solvent: serde_json::from_str(&row.get::<_, String>(4)?).unwrap(),
+            atmo_aff: serde_json::from_str(&row.get::<_, String>(5)?).unwrap(),
+            food_tag: serde_json::from_str(&row.get::<_, String>(6)?).unwrap(),
+            temp_range: serde_json::from_str(&row.get::<_, String>(7)?).unwrap(),
+            press_range: serde_json::from_str(&row.get::<_, String>(8)?).unwrap(),
+            grav_range: serde_json::from_str(&row.get::<_, String>(9)?).unwrap(),
         })
     }).unwrap()
         .map(|s| s.unwrap())
