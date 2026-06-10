@@ -12,6 +12,8 @@ fn main() {
         id: Uuid::new_v4(),
         name: Some(String::from("Human")),
         kind: bio::SpeciesKind::Named,
+        origin_world_id: Uuid::new_v4(),
+        sentience: Some(bio::SpeciesSentience::Sapient),
         basis: bio::LifeBasis::Carbon,
         solvent: bio::Solvent::Water,
         atmo_aff: vec![
@@ -70,6 +72,7 @@ fn main() {
             ],
             is_sexual: true,
         },
+        lifespan: Some(common::Range {min: 65, max: 110}),
         temp_range: Some(common::Range { min: 20.0, max: 25.0 }),
         press_range: Some(common::Range { min: 80.0, max: 120.0 }),
         grav_range: Some(common::Range { min: 0.35, max: 2.25 })

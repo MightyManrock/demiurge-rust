@@ -9,6 +9,12 @@ pub enum SpeciesKind {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub enum SpeciesSentience {
+    Sentient,
+    Sapient,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub enum LifeBasis {
     Carbon,
     Silicon,
@@ -99,12 +105,17 @@ pub struct Species {
     pub id: Uuid,
     pub name: Option<String>,
     pub kind: SpeciesKind,
+    pub origin_world_id: Uuid,
+    pub sentience: Option<SpeciesSentience>,
     pub basis: LifeBasis,
     pub solvent: Solvent,
     pub atmo_aff: Vec<AtmosphereAffinity>,
     pub food_tag: Vec<FoodTag>,
     pub repro_profile: ReproductionProfile,
+    pub lifespan: Option<Range<u32>>,
     pub temp_range: Option<Range<f32>>,
     pub press_range: Option<Range<f32>>,
     pub grav_range: Option<Range<f32>>,
+//  pub visibility: EntityVisibility,   // This will be defined for entities generally.
+//  pinned: bool,
 }

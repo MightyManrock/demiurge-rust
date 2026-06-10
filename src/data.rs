@@ -8,33 +8,40 @@ fn write_species(conn: &Connection, species_list: Vec<bio::Species>) {
 
     conn.execute_batch("
       CREATE TABLE IF NOT EXISTS species (
-          id          TEXT PRIMARY KEY,
-          name        TEXT,
-          kind        TEXT NOT NULL,
-          basis       TEXT NOT NULL,
-          solvent     TEXT NOT NULL,
-          atmo_aff    TEXT NOT NULL,
-          food_tag    TEXT NOT NULL,
-          repro_profile TEXT NOT NULL,
-          temp_range  TEXT,
-          press_range TEXT,
-          grav_range  TEXT
+          id                TEXT PRIMARY KEY,
+          name              TEXT,
+          kind              TEXT NOT NULL,
+          origin_world_id   TEXT NOT NULL,
+          sentience         TEXT,
+          basis             TEXT NOT NULL,
+          solvent           TEXT NOT NULL,
+          atmo_aff          TEXT NOT NULL,
+          food_tag          TEXT NOT NULL,
+          repro_profile     TEXT NOT NULL,
+          lifespan          TEXT,
+          temp_range        TEXT,
+          press_range       TEXT,
+          grav_range        TEXT
         );
     ").unwrap();
 
     for species in species_list {
         conn.execute(
-            "INSERT INTO species (id, name, kind, basis, solvent, atmo_aff, food_tag, repro_profile, temp_range, press_range, grav_range)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            "INSERT INTO species (id, name, kind, origin_world_id, sentience, basis,
+                solvent, atmo_aff, food_tag, repro_profile, lifespan, temp_range, press_range, grav_range)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             rusqlite::params![
                 species.id.to_string(),
                 species.name,
                 serde_json::to_string(&species.kind).unwrap(),
+                species.origin_world_id.to_string(),
+                serde_json::to_string(&species.sentience).unwrap(),
                 serde_json::to_string(&species.basis).unwrap(),
                 serde_json::to_string(&species.solvent).unwrap(),
                 serde_json::to_string(&species.atmo_aff).unwrap(),
                 serde_json::to_string(&species.food_tag).unwrap(),
                 serde_json::to_string(&species.repro_profile).unwrap(),
+                serde_json::to_string(&species.lifespan).unwrap(),
                 serde_json::to_string(&species.temp_range).unwrap(),
                 serde_json::to_string(&species.press_range).unwrap(),
                 serde_json::to_string(&species.grav_range).unwrap(),
@@ -58,7 +65,8 @@ pub(crate) fn read_db(path: &str) -> Vec<bio::Species> {
     let conn = Connection::open(path).unwrap();
 
     let mut stmt = conn.prepare(
-        "SELECT id, name, kind, basis, solvent, atmo_aff, food_tag, repro_profile, temp_range, press_range, grav_range FROM species"
+        "SELECT id, name, kind, origin_world_id, sentience, basis, solvent, atmo_aff, food_tag,
+            repro_profile, lifespan, temp_range, press_range, grav_range FROM species"
     ).unwrap();
 
     let species_list: Vec<bio::Species> = stmt.query_map([], |row| {
@@ -66,14 +74,17 @@ pub(crate) fn read_db(path: &str) -> Vec<bio::Species> {
             id: row.get::<_, String>(0)?.parse::<Uuid>().unwrap(),
             name: row.get(1)?,
             kind: serde_json::from_str(&row.get::<_, String>(2)?).unwrap(),
-            basis: serde_json::from_str(&row.get::<_, String>(3)?).unwrap(),
-            solvent: serde_json::from_str(&row.get::<_, String>(4)?).unwrap(),
-            atmo_aff: serde_json::from_str(&row.get::<_, String>(5)?).unwrap(),
-            food_tag: serde_json::from_str(&row.get::<_, String>(6)?).unwrap(),
-            repro_profile: serde_json::from_str(&row.get::<_, String>(7)?).unwrap(),
-            temp_range: serde_json::from_str(&row.get::<_, String>(8)?).unwrap(),
-            press_range: serde_json::from_str(&row.get::<_, String>(9)?).unwrap(),
-            grav_range: serde_json::from_str(&row.get::<_, String>(10)?).unwrap(),
+            origin_world_id: row.get::<_, String>(3)?.parse::<Uuid>().unwrap(),
+            sentience: serde_json::from_str(&row.get::<_, String>(4)?).unwrap(),
+            basis: serde_json::from_str(&row.get::<_, String>(5)?).unwrap(),
+            solvent: serde_json::from_str(&row.get::<_, String>(6)?).unwrap(),
+            atmo_aff: serde_json::from_str(&row.get::<_, String>(7)?).unwrap(),
+            food_tag: serde_json::from_str(&row.get::<_, String>(8)?).unwrap(),
+            repro_profile: serde_json::from_str(&row.get::<_, String>(9)?).unwrap(),
+            lifespan: serde_json::from_str(&row.get::<_, String>(10)?).unwrap(),
+            temp_range: serde_json::from_str(&row.get::<_, String>(11)?).unwrap(),
+            press_range: serde_json::from_str(&row.get::<_, String>(12)?).unwrap(),
+            grav_range: serde_json::from_str(&row.get::<_, String>(13)?).unwrap(),
         })
     }).unwrap()
         .map(|s| s.unwrap())
