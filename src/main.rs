@@ -57,7 +57,14 @@ fn main() {
         ],
         repro_profile: bio::ReproductionProfile {
             sex_types: vec![
-                // Unsure on how to format SexTypes
+                bio::SexType {
+                    name: String::from("Male"),
+                    reproductive_role: Some(vec![bio::ReproductiveRole::Contributor])
+                },
+                bio::SexType {
+                    name: String::from("Female"),
+                    reproductive_role: Some(vec![bio::ReproductiveRole::Receiver])
+                },
             ],
             is_sexual: true,
         },

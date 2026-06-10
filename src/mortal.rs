@@ -97,9 +97,9 @@ pub struct Mortal {
 //  pub name: MortalName,   // TO-DO: create a MortalName struct that references
 //  pub title: MortalTitle, // naming conventions of a Civ, as well as a
     pub species_id: Uuid,   // MortalTitle struct that has a bit of logic to it.
-//  pub sex: MortalSex,     // MortalSex will draw from the parent species' defined
-    pub civ_id: Uuid,       // qualities. (Not all are male/female or even reproduce
-    pub age: MortalAge,     // sexually, so it will necessarily get complicated.)
+    pub sex: String,
+    pub civ_id: Uuid,
+    pub age: MortalAge,
     pub home_loc_id: Uuid,
     pub current_loc_id: Uuid,
     pub orig_pop_id: Uuid,

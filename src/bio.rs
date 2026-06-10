@@ -76,7 +76,7 @@ pub enum FoodTag {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ReproductiveRole {
-    Contributer,
+    Contributor,
     Receiver,
 }
 
