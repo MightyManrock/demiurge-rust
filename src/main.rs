@@ -70,7 +70,8 @@ fn main() {
                     reproductive_role: Some(vec![bio::ReproductiveRole::Receiver])
                 },
             ],
-            is_sexual: true,
+            repro_type: vec![bio::ReproductionType::Sexual],
+            repro_method: bio::ReproductiveMethod::Viviparity,
         },
         lifespan: Some(common::Range {min: 65, max: 110}),
         temp_range: Some(common::Range { min: 20.0, max: 25.0 }),

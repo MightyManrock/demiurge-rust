@@ -11,6 +11,7 @@ pub enum SpeciesKind {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum SpeciesSentience {
     Sentient,
+    PreSapient,
     Sapient,
 }
 
@@ -94,10 +95,27 @@ pub struct SexType {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub enum ReproductionType {
+    Fission,
+    Sporogenesis,
+    Fragmentation,
+    Agamogenesis,
+    Sexual,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum ReproductiveMethod {
+    Ovuliparity,
+    Zygoparity,
+    Ovoviviparity,
+    Viviparity,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ReproductionProfile {
     pub sex_types: Vec<SexType>,
-    pub is_sexual: bool,
-    // other values
+    pub repro_type: Vec<ReproductionType>,
+    pub repro_method: ReproductiveMethod,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
