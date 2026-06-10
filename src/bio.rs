@@ -2,15 +2,13 @@ use crate::common::Range;
 use serde::{Serialize, Deserialize};
 use uuid::Uuid;
 
-#[derive(Debug)]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum SpeciesKind {
     Named,
     Generic,
 }
 
-#[derive(Debug)]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum LifeBasis {
     Carbon,
     Silicon,
@@ -20,8 +18,7 @@ pub enum LifeBasis {
     Phosphorus,
 }
 
-#[derive(Debug)]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum Solvent {
     Water,
     Ammonia,
@@ -33,8 +30,7 @@ pub enum Solvent {
     Formamide,
 }
 
-#[derive(Debug)]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum AtmosphereTag {
     Oxygen,
     Nitrogen,
@@ -45,8 +41,7 @@ pub enum AtmosphereTag {
     Sulfate,
 }
 
-#[derive(Debug)]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum AtmosphereRelationship {
     Required,
     Beneficial,
@@ -55,8 +50,7 @@ pub enum AtmosphereRelationship {
     Fatal,
 }
 
-#[derive(Debug)]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum RespirationMedium {
     Gas,
     Liquid,
@@ -64,16 +58,14 @@ pub enum RespirationMedium {
     Vacuum,
 }
 
-#[derive(Debug)]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AtmosphereAffinity {
     pub tag: Option<AtmosphereTag>,
     pub relationship: AtmosphereRelationship,
     pub medium: RespirationMedium,
 }
 
-#[derive(Debug)]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum FoodTag {
     Herbivorous,
     Carnivorous,
@@ -82,8 +74,7 @@ pub enum FoodTag {
     Lithotrophic,
 }
 
-#[derive(Debug)]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Species {
     pub id: Uuid,
     pub name: Option<String>,

@@ -2,37 +2,32 @@ use serde::{Serialize, Deserialize};
 use uuid::Uuid;
 use std::collections::HashMap;
 
-#[derive(Debug)]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum DivineRole {
     Proxius,
     Herald,
 }
 
-#[derive(Debug)]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum DivineStatus {
     Active,
     Dormant,
 }
 
-#[derive(Debug)]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct DivineSpark {                // More "divine relational" fields to be on
     pub role: Option<DivineRole>,       // MortalState, as well as things like divine
     pub status: Option<DivineStatus>,   // powers unlocked, Imāginēs know (if applicable),
     pub appointed_tick: Option<u32>,    // etc.
 }
 
-#[derive(Debug)]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum GroupRole {
     Member,
     Leader,
 }
 
-#[derive(Debug)]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct FactionAffiliation {
     pub faction_id: Uuid,
     pub role: GroupRole,
@@ -40,8 +35,7 @@ pub struct FactionAffiliation {
     pub joined_tick: u32,
 }
 
-#[derive(Debug)]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct BandAffiliation {
     pub band_id: Uuid,
     pub role: GroupRole,
@@ -49,8 +43,7 @@ pub struct BandAffiliation {
     pub joined_tick: u32,
 }
 
-#[derive(Debug)]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct MortalIdentity {
 //  pub beliefs: HashMap<Belief, f32>,  // Belief and Culture enums to be shared
 //  pub culture: HashMap<Culture, f32>, // by all entities (Civs, Pops, etc.)
@@ -62,8 +55,7 @@ pub struct MortalIdentity {
 // civilization. Might also encompass sexuality if that is ever
 // relevant to the simulation.
 
-#[derive(Debug)]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Hash, Eq, PartialEq)]
 pub enum Skill {
     // Material & Occupational
     Trade,
@@ -87,8 +79,7 @@ pub enum Skill {
     Scholarship,
 }
 
-#[derive(Debug)]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct MortalAge {
     pub birthday_billions: Option<u32>,     // `bio_age` as a property derived from
     pub birthday_millions: Option<u32>,     // in-game date - birthday`? `chrono_age`
@@ -100,8 +91,7 @@ pub struct MortalAge {
     pub chrono_age: Option<u32>,    
 }                                   
 
-#[derive(Debug)]                    
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Mortal {
     pub id: Uuid,
 //  pub name: MortalName,   // TO-DO: create a MortalName struct that references
