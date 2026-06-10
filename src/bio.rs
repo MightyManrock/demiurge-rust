@@ -104,9 +104,9 @@ pub enum ReproductionType {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub enum ReproductiveMethod {
-    Ovuliparity,
-    Zygoparity,
+pub enum ReproductiveMethod {   // Only applies if
+    Ovuliparity,                // ReproductionType is
+    Zygoparity,                 // Sexual.
     Ovoviviparity,
     Viviparity,
 }
@@ -115,7 +115,7 @@ pub enum ReproductiveMethod {
 pub struct ReproductionProfile {
     pub sex_types: Vec<SexType>,
     pub repro_type: Vec<ReproductionType>,
-    pub repro_method: ReproductiveMethod,
+    pub repro_method: Option<ReproductiveMethod>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
