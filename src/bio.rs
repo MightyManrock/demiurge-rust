@@ -75,6 +75,25 @@ pub enum FoodTag {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub enum ReproductiveRole {
+    Contributer,
+    Receiver,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SexType {
+    pub name: String,
+    pub reproductive_role: Option<Vec<ReproductiveRole>>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ReproductionProfile {
+    pub sex_types: Vec<SexType>,
+    pub is_sexual: bool,
+    // other values
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Species {
     pub id: Uuid,
     pub name: Option<String>,
@@ -83,6 +102,7 @@ pub struct Species {
     pub solvent: Solvent,
     pub atmo_aff: Vec<AtmosphereAffinity>,
     pub food_tag: Vec<FoodTag>,
+    pub repro_profile: ReproductionProfile,
     pub temp_range: Option<Range<f32>>,
     pub press_range: Option<Range<f32>>,
     pub grav_range: Option<Range<f32>>,

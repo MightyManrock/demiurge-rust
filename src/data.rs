@@ -15,6 +15,7 @@ fn write_species(conn: &Connection, species_list: Vec<bio::Species>) {
           solvent     TEXT NOT NULL,
           atmo_aff    TEXT NOT NULL,
           food_tag    TEXT NOT NULL,
+          repro_profile TEXT NOT NULL,
           temp_range  TEXT,
           press_range TEXT,
           grav_range  TEXT
@@ -23,8 +24,8 @@ fn write_species(conn: &Connection, species_list: Vec<bio::Species>) {
 
     for species in species_list {
         conn.execute(
-            "INSERT INTO species (id, name, kind, basis, solvent, atmo_aff, food_tag, temp_range, press_range, grav_range)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            "INSERT INTO species (id, name, kind, basis, solvent, atmo_aff, food_tag, repro_profile, temp_range, press_range, grav_range)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             rusqlite::params![
                 species.id.to_string(),
                 species.name,
@@ -33,6 +34,7 @@ fn write_species(conn: &Connection, species_list: Vec<bio::Species>) {
                 serde_json::to_string(&species.solvent).unwrap(),
                 serde_json::to_string(&species.atmo_aff).unwrap(),
                 serde_json::to_string(&species.food_tag).unwrap(),
+                serde_json::to_string(&species.repro_profile).unwrap(),
                 serde_json::to_string(&species.temp_range).unwrap(),
                 serde_json::to_string(&species.press_range).unwrap(),
                 serde_json::to_string(&species.grav_range).unwrap(),
@@ -56,7 +58,7 @@ pub(crate) fn read_db(path: &str) -> Vec<bio::Species> {
     let conn = Connection::open(path).unwrap();
 
     let mut stmt = conn.prepare(
-        "SELECT id, name, kind, basis, solvent, atmo_aff, food_tag, temp_range, press_range, grav_range FROM species"
+        "SELECT id, name, kind, basis, solvent, atmo_aff, food_tag, repro_profile, temp_range, press_range, grav_range FROM species"
     ).unwrap();
 
     let species_list: Vec<bio::Species> = stmt.query_map([], |row| {
@@ -68,9 +70,10 @@ pub(crate) fn read_db(path: &str) -> Vec<bio::Species> {
             solvent: serde_json::from_str(&row.get::<_, String>(4)?).unwrap(),
             atmo_aff: serde_json::from_str(&row.get::<_, String>(5)?).unwrap(),
             food_tag: serde_json::from_str(&row.get::<_, String>(6)?).unwrap(),
-            temp_range: serde_json::from_str(&row.get::<_, String>(7)?).unwrap(),
-            press_range: serde_json::from_str(&row.get::<_, String>(8)?).unwrap(),
-            grav_range: serde_json::from_str(&row.get::<_, String>(9)?).unwrap(),
+            repro_profile: serde_json::from_str(&row.get::<_, String>(7)?).unwrap(),
+            temp_range: serde_json::from_str(&row.get::<_, String>(8)?).unwrap(),
+            press_range: serde_json::from_str(&row.get::<_, String>(9)?).unwrap(),
+            grav_range: serde_json::from_str(&row.get::<_, String>(10)?).unwrap(),
         })
     }).unwrap()
         .map(|s| s.unwrap())

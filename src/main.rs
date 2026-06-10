@@ -55,6 +55,12 @@ fn main() {
             bio::FoodTag::Herbivorous,
             bio::FoodTag::Carnivorous,
         ],
+        repro_profile: bio::ReproductionProfile {
+            sex_types: vec![
+                // Unsure on how to format SexTypes
+            ],
+            is_sexual: true,
+        },
         temp_range: Some(common::Range { min: 20.0, max: 25.0 }),
         press_range: Some(common::Range { min: 80.0, max: 120.0 }),
         grav_range: Some(common::Range { min: 0.35, max: 2.25 })
