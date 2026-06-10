@@ -83,6 +83,7 @@ pub enum ReproductiveRole {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SexType {
     pub name: String,
+    pub symbol: Option<String>,
     pub reproductive_role: Option<Vec<ReproductiveRole>>,
 }
 

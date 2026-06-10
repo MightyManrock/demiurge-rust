@@ -59,10 +59,12 @@ fn main() {
             sex_types: vec![
                 bio::SexType {
                     name: String::from("Male"),
+                    symbol: Some(String::from("♂")),
                     reproductive_role: Some(vec![bio::ReproductiveRole::Contributor])
                 },
                 bio::SexType {
                     name: String::from("Female"),
+                    symbol: Some(String::from("♀")),
                     reproductive_role: Some(vec![bio::ReproductiveRole::Receiver])
                 },
             ],
