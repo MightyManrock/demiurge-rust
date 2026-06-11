@@ -1,7 +1,7 @@
 use image::{ImageBuffer, Rgb};
 use noise::{Fbm, NoiseFn, Perlin};
 use std::cmp::Reverse;
-use std::collections::BinaryHeap;
+use std::collections::{BinaryHeap, VecDeque};
 
 // ── Data structures ──────────────────────────────────────────────────────────
 
@@ -75,6 +75,14 @@ impl HeatMap {
         let height = elevation.height;
         let n = width * height;
 
+        // ── Ocean flood-fill ─────────────────────────────────────────────────
+        //
+        // Rather than treating every cell below sea level as ocean, we BFS from
+        // the global minimum and spread only to connected cells below sea level.
+        // Any below-sea-level area not reachable from the lowest point is an
+        // inland basin (dead sea, salt flat) — not ocean.
+        let is_ocean = flood_fill_ocean(&elevation.data, width, height, params.sea_level);
+
         // ── Phase 1: Priority-flood depression filling ───────────────────────
         //
         // Seeds the flood from all ocean cells and pole edges. Each cell's
@@ -96,7 +104,7 @@ impl HeatMap {
             for x in 0..width {
                 let idx = y * width + x;
                 let is_pole = y == 0 || y == height - 1;
-                if is_pole || elevation.data[idx] < params.sea_level {
+                if is_pole || is_ocean[idx] {
                     in_queue[idx] = true;
                     heap.push((Reverse(float_key(filled[idx])), idx));
                 }
@@ -132,7 +140,7 @@ impl HeatMap {
         for y in 0..height {
             for x in 0..width {
                 let idx = y * width + x;
-                if elevation.data[idx] < params.sea_level {
+                if is_ocean[idx] {
                     continue;
                 }
                 let h = filled[idx];
@@ -166,7 +174,7 @@ impl HeatMap {
         // are rivers; cells with low accumulation are dry hillsides.
 
         let mut land_order: Vec<usize> = (0..n)
-            .filter(|&i| elevation.data[i] >= params.sea_level)
+            .filter(|&i| !is_ocean[i])
             .collect();
         land_order.sort_unstable_by(|&a, &b| filled[b].total_cmp(&filled[a]));
 
@@ -196,8 +204,7 @@ impl HeatMap {
         let mut aquifer_zones = Vec::new();
         let endorheic: Vec<bool> = (0..n)
             .map(|i| {
-                elevation.data[i] >= params.sea_level
-                    && filled[i] - elevation.data[i] > params.max_lake_fill
+                !is_ocean[i] && filled[i] - elevation.data[i] > params.max_lake_fill
             })
             .collect();
 
@@ -227,7 +234,7 @@ impl HeatMap {
                 let elev = elevation.data[idx];
                 let fill_depth = filled[idx] - elev;
 
-                data[idx] = if elev < params.sea_level {
+                data[idx] = if is_ocean[idx] {
                     let depth = (params.sea_level - elev) / params.sea_level;
                     0.5 + depth.clamp(0.0, 1.0) * 0.5
                 } else if endorheic[idx] {
@@ -329,6 +336,37 @@ fn water_color(t: f64) -> [u8; 3] {
 }
 
 // ── Utilities ────────────────────────────────────────────────────────────────
+
+/// BFS flood-fill from the global elevation minimum, marking all connected
+/// cells below sea_level as ocean. Disconnected below-sea-level areas are
+/// inland basins (not ocean) and fall through to normal lake/endorheic logic.
+fn flood_fill_ocean(data: &[f64], width: usize, height: usize, sea_level: f64) -> Vec<bool> {
+    let n = width * height;
+    let mut is_ocean = vec![false; n];
+
+    let min_idx = (0..n).min_by(|&a, &b| data[a].total_cmp(&data[b])).unwrap();
+    if data[min_idx] >= sea_level {
+        return is_ocean; // entirely dry planet
+    }
+
+    let mut queue = VecDeque::new();
+    is_ocean[min_idx] = true;
+    queue.push_back(min_idx);
+
+    while let Some(idx) = queue.pop_front() {
+        let x = idx % width;
+        let y = idx / width;
+        for (nx, ny) in neighbors_8(x, y, width, height) {
+            let nidx = ny * width + nx;
+            if !is_ocean[nidx] && data[nidx] < sea_level {
+                is_ocean[nidx] = true;
+                queue.push_back(nidx);
+            }
+        }
+    }
+
+    is_ocean
+}
 
 /// Convert a [0, 1] float to an integer heap key for min-heap ordering.
 fn float_key(v: f64) -> u64 {
