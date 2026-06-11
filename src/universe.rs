@@ -80,8 +80,16 @@ pub struct Galaxy {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub enum StarType {
-
+pub enum StarKind {
+    BlueGiant,
+    WhiteStar,
+    YellowDwarf,
+    OrangeDwarf,
+    RedDwarf,
+    RedGiant,
+    WhiteDwarf,
+    NeutronStar,
+    BlackHole,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -89,7 +97,7 @@ pub struct Star {
     pub id: Uuid,
     pub name: String,
     pub age: EntityAge,
-    pub kind: StarType,
+    pub kind: StarKind,
     pub parent_id: Option<Uuid>,        // System ID
     pub companion_ids: Option<Vec<Uuid>>, // Other Star IDs
     pub domain_exp: HashMap<Domain, f64>,
@@ -120,8 +128,17 @@ pub enum AtmosphereTag {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum GeoTag {
-
+      Oceanic,
+      Arid,
+      Glacial,
+      Rocky,                                                                                                                   
+      Crystalline,
+      Cavernous,
+      Dune,
+      Verdant,
+      Ash,
 }
+
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Planet {
@@ -140,10 +157,21 @@ pub struct Planet {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub enum PopLocationKind {
+    Surface,
+    Subterranean,
+    Aquatic,
+    Orbital,
+    DeepSpace,
+    Airborne,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct PopLocation {
     pub id: Uuid,
     pub name: String,
     pub age: EntityAge,
+    pub kind: PopLocationKind,
     pub parent_id: Uuid,
     pub atmo: Option<Vec<AtmosphereTag>>,
     pub geo: Option<Vec<GeoTag>>,
