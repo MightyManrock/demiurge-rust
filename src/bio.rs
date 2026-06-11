@@ -96,7 +96,7 @@ pub enum ReproductionKind {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ReproductiveMethod {   // Only applies if
-    Ovuliparity,                // ReproductionType is
+    Ovuliparity,                // ReproductionKind is
     Zygoparity,                 // Sexual.
     Ovoviviparity,
     Viviparity,
