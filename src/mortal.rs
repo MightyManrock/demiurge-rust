@@ -110,7 +110,7 @@ pub struct Mortal {
     pub identity: MortalIdentity,
 //  pub occupation: Occupation, // This will probably come from an Enum and default to orig_pop's occupation.
 //  pub status: String,                 // Merge in a struct with title or something else?
-    pub skills: HashMap<Skill, f32>,
+    pub skills: HashMap<Skill, f64>,
 //  pub agent: MortalAgent,             // This will be defined in agent defs.
 //  pub visibility: EntityVisibility,   // This will be defined for entities generally.
     pub pinned: bool,

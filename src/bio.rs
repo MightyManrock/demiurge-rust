@@ -1,6 +1,8 @@
-use crate::common::Range;
 use serde::{Serialize, Deserialize};
 use uuid::Uuid;
+
+use crate::common::Range;
+use crate::universe::AtmosphereTag;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum SpeciesKind {
@@ -35,17 +37,6 @@ pub enum Solvent {
     SiliconDioxide,
     SulfuricAcid,
     Formamide,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub enum AtmosphereTag {
-    Oxygen,
-    Nitrogen,
-    CarbonMonoxide,
-    CarbonDioxide,
-    Methane,
-    Fumarate,
-    Sulfate,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

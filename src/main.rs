@@ -1,8 +1,11 @@
 #![allow(dead_code)]
 
 mod common;
-mod bio;
 mod data;
+mod universe;
+mod bio;
+// mod mortal;
+
 
 use uuid::Uuid;
 
@@ -18,22 +21,22 @@ fn main() {
         solvent: bio::Solvent::Water,
         atmo_aff: vec![
             bio::AtmosphereAffinity {
-                tag: Some(bio::AtmosphereTag::Oxygen),
+                tag: Some(universe::AtmosphereTag::Oxygen),
                 relationship: bio::AtmosphereRelationship::Required,
                 medium: bio::RespirationMedium::Gas,
             },
             bio::AtmosphereAffinity {
-                tag: Some(bio::AtmosphereTag::CarbonMonoxide),
+                tag: Some(universe::AtmosphereTag::CarbonMonoxide),
                 relationship: bio::AtmosphereRelationship::Toxic,
                 medium: bio::RespirationMedium::Gas,
             },
             bio::AtmosphereAffinity {
-                tag: Some(bio::AtmosphereTag::Methane),
+                tag: Some(universe::AtmosphereTag::Methane),
                 relationship: bio::AtmosphereRelationship::Fatal,
                 medium: bio::RespirationMedium::Gas,
             },
             bio::AtmosphereAffinity {
-                tag: Some(bio::AtmosphereTag::CarbonDioxide),
+                tag: Some(universe::AtmosphereTag::CarbonDioxide),
                 relationship: bio::AtmosphereRelationship::Tolerated,
                 medium: bio::RespirationMedium::Gas,
             },
