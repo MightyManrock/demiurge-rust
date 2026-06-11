@@ -79,14 +79,14 @@ pub enum ReproductiveRole {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct SexType {
+pub struct SexKind {
     pub name: String,
     pub symbol: Option<String>,
     pub reproductive_role: Option<Vec<ReproductiveRole>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub enum ReproductionType {
+pub enum ReproductionKind {
     Fission,
     Sporogenesis,
     Fragmentation,
@@ -104,8 +104,8 @@ pub enum ReproductiveMethod {   // Only applies if
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ReproductionProfile {
-    pub sex_types: Vec<SexType>,
-    pub repro_type: Vec<ReproductionType>,
+    pub sex_kinds: Vec<SexKind>,
+    pub repro_kind: Vec<ReproductionKind>,
     pub repro_method: Option<ReproductiveMethod>,
 }
 

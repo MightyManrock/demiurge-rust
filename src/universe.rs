@@ -89,7 +89,7 @@ pub struct Star {
     pub id: Uuid,
     pub name: String,
     pub age: EntityAge,
-    pub _type: StarType,
+    pub kind: StarType,
     pub parent_id: Option<Uuid>,        // System ID
     pub companion_ids: Option<Vec<Uuid>>, // Other Star IDs
     pub domain_exp: HashMap<Domain, f64>,

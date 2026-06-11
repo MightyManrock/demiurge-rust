@@ -61,19 +61,19 @@ fn main() {
             bio::FoodTag::Carnivorous,
         ],
         repro_profile: bio::ReproductionProfile {
-            sex_types: vec![
-                bio::SexType {
+            sex_kinds: vec![
+                bio::SexKind {
                     name: String::from("Male"),
                     symbol: Some(String::from("♂")),
                     reproductive_role: Some(vec![bio::ReproductiveRole::Contributor])
                 },
-                bio::SexType {
+                bio::SexKind {
                     name: String::from("Female"),
                     symbol: Some(String::from("♀")),
                     reproductive_role: Some(vec![bio::ReproductiveRole::Receiver])
                 },
             ],
-            repro_type: vec![bio::ReproductionType::Sexual],
+            repro_kind: vec![bio::ReproductionKind::Sexual],
             repro_method: Some(bio::ReproductiveMethod::Viviparity),
         },
         lifespan: Some(common::Range {min: 65, max: 110}),
