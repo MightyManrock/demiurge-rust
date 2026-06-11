@@ -66,18 +66,13 @@ fn lerp_color(a: [u8; 3], b: [u8; 3], t: f64) -> [u8; 3] {
     ]
 }
 
-/// Terrain elevation gradient: deep ocean → coast → lowland → highland → peak.
+/// Raw elevation gradient: red (lowest) → yellow (mid) → green (highest).
+/// No terrain semantics — ocean level, biomes, and rivers are separate concerns.
 fn elevation_color(t: f64) -> [u8; 3] {
     const STOPS: &[([u8; 3], f64)] = &[
-        ([15,  40, 100], 0.00),  // deep ocean
-        ([30,  90, 180], 0.30),  // open water
-        ([65, 145, 215], 0.44),  // shallow / coastal water
-        ([210, 190, 130], 0.48), // beach / sand
-        ([110, 170,  80], 0.54), // lowland / grassland
-        ([60,  130,  50], 0.65), // forest / midland
-        ([110,  90,  55], 0.76), // highland / scrub
-        ([150, 140, 130], 0.86), // rocky mountain
-        ([230, 230, 235], 1.00), // snow / peak
+        ([255,   0,   0], 0.00), // lowest
+        ([255, 255,   0], 0.50), // mid
+        ([  0, 255,   0], 1.00), // highest
     ];
 
     for i in 0..STOPS.len() - 1 {
