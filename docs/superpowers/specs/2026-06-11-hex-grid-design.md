@@ -1,7 +1,9 @@
 # Hex Grid Design
 
 **Date:** 2026-06-11
-**Status:** Decided — not yet implemented
+**Status:** Superseded — replaced by `2026-06-11-world-map-design.md`
+
+This document is archived. The hex grid approach was replaced by a continuous coordinate + heat map model. Refer to the new world map design spec for current decisions.
 
 ---
 
