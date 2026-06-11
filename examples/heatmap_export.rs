@@ -373,7 +373,13 @@ fn float_key(v: f64) -> u64 {
     (v.clamp(0.0, 1.0) * 1_000_000.0) as u64
 }
 
-/// 8-connected neighbors with x-axis wrapping and y-axis clamping.
+/// 8-connected neighbors with full spherical topology.
+///
+/// x wraps east-west as normal. At the poles, going off the top or bottom edge
+/// wraps to the same pole row but offset by width/2 — the equirectangular
+/// projection of crossing the pole and emerging on the opposite side of the
+/// planet. Duplicates are suppressed (can occur when multiple dx values map to
+/// the same cell near the poles).
 fn neighbors_8(x: usize, y: usize, width: usize, height: usize) -> Vec<(usize, usize)> {
     let mut result = Vec::with_capacity(8);
     for dy in -1i32..=1 {
@@ -381,12 +387,22 @@ fn neighbors_8(x: usize, y: usize, width: usize, height: usize) -> Vec<(usize, u
             if dx == 0 && dy == 0 {
                 continue;
             }
-            let ny = y as i32 + dy;
-            if ny < 0 || ny >= height as i32 {
-                continue;
+            let mut nx = (x as i32 + dx).rem_euclid(width as i32) as usize;
+            let ny_raw = y as i32 + dy;
+            let ny = if ny_raw < 0 {
+                // Crossed the north pole: emerge on the opposite side, same row.
+                nx = (nx + width / 2) % width;
+                0
+            } else if ny_raw >= height as i32 {
+                // Crossed the south pole: emerge on the opposite side, same row.
+                nx = (nx + width / 2) % width;
+                height - 1
+            } else {
+                ny_raw as usize
+            };
+            if !result.contains(&(nx, ny)) {
+                result.push((nx, ny));
             }
-            let nx = (x as i32 + dx).rem_euclid(width as i32) as usize;
-            result.push((nx, ny as usize));
         }
     }
     result
