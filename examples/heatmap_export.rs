@@ -742,6 +742,13 @@ const BAYER_4X4: [[f64; 4]; 4] = [
     [15.0 / 16.0,  7.0 / 16.0, 13.0 / 16.0,  5.0 / 16.0],
 ];
 
+/// Returns true if the elevation value crosses a contour boundary between
+/// this pixel and either of its right/down neighbors.
+fn is_contour(e: f64, e_right: f64, e_down: f64, n_contours: usize) -> bool {
+    let level = |v: f64| (v * n_contours as f64).floor() as i64;
+    level(e) != level(e_right) || level(e) != level(e_down)
+}
+
 /// Ordered dither: quantize t to n_levels steps, using Bayer threshold at
 /// render pixel (rx, ry) to break ties at level boundaries.
 fn bayer_dither(t: f64, rx: usize, ry: usize, n_levels: usize) -> f64 {
@@ -911,15 +918,17 @@ fn main() {
     hydro_img.save("hydrology.png").expect("failed to save hydrology.png");
     println!("Saved hydrology.png");
 
-    // Composite: 3× render resolution with Bayer ordered dithering.
-    // Data pixels are centers of 3×3 render pixel blocks; bilinear interpolation
-    // on the heat maps handles transitions between data points.
+    // Composite: 3× render resolution with Bayer ordered dithering and
+    // topographic contour lines. Contours are detected by checking whether
+    // adjacent render pixels straddle an elevation level boundary.
+    const N_CONTOURS: usize = 40;
+    const CONTOUR_DARKEN: f64 = 0.70;
     println!("Rendering composite at {}x{}...", render_width, render_height);
     let composite = ImageBuffer::from_fn(render_width as u32, render_height as u32, |rx, ry| {
         let nx = rx as f64 / render_width as f64;
         let ny = ry as f64 / render_height as f64;
         let hydro = result.map.sample(nx, ny);
-        let color = if hydro > 0.0 {
+        let mut color = if hydro > 0.0 {
             let d = bayer_dither(hydro, rx as usize, ry as usize, N_DITHER_LEVELS).max(0.01);
             water_color(d)
         } else {
@@ -928,6 +937,20 @@ fn main() {
             let d = bayer_dither(land_t, rx as usize, ry as usize, N_DITHER_LEVELS);
             terrain_color(d)
         };
+        if hydro <= 0.0 {
+            let nx_r = (rx as usize + 1) as f64 / render_width as f64;
+            let ny_d = (ry as usize + 1) as f64 / render_height as f64;
+            let e = elevation.sample(nx, ny);
+            let e_r = elevation.sample(nx_r, ny);
+            let e_d = elevation.sample(nx, ny_d);
+            if is_contour(e, e_r, e_d, N_CONTOURS) {
+                color = [
+                    (color[0] as f64 * CONTOUR_DARKEN) as u8,
+                    (color[1] as f64 * CONTOUR_DARKEN) as u8,
+                    (color[2] as f64 * CONTOUR_DARKEN) as u8,
+                ];
+            }
+        }
         Rgb(color)
     });
     composite.save("composite.png").expect("failed to save composite.png");
