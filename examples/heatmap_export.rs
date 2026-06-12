@@ -549,6 +549,13 @@ impl HeatMap {
         }
     }
 
+    /// Sample by nearest-neighbor. x and y are in [0, 1).
+    fn sample_nearest(&self, x: f64, y: f64) -> f64 {
+        let px = (x.rem_euclid(1.0) * self.width as f64) as usize % self.width;
+        let py = (y.clamp(0.0, 1.0 - f64::EPSILON) * self.height as f64) as usize;
+        self.data[py * self.width + px]
+    }
+
     /// Sample by bilinear interpolation. x and y are in [0, 1).
     fn sample(&self, x: f64, y: f64) -> f64 {
         let px = x.rem_euclid(1.0) * self.width as f64;
@@ -928,8 +935,11 @@ fn main() {
     let composite = ImageBuffer::from_fn(render_width as u32, render_height as u32, |rx, ry| {
         let nx = rx as f64 / render_width as f64;
         let ny = ry as f64 / render_height as f64;
-        let hydro = result.map.sample(nx, ny);
-        let mut color = if hydro > 0.0 {
+        // Nearest-neighbor for classification avoids bilinear-interpolated halos
+        // around water cells that would otherwise render as near-white water color.
+        let is_water = result.map.sample_nearest(nx, ny) > 0.0;
+        let mut color = if is_water {
+            let hydro = result.map.sample(nx, ny);
             let d = bayer_dither(hydro, rx as usize, ry as usize, N_DITHER_LEVELS).max(0.01);
             water_color(d)
         } else {
@@ -944,7 +954,7 @@ fn main() {
         let e_r = elevation.sample(nx_r, ny);
         let e_d = elevation.sample(nx, ny_d);
         if is_contour(e, e_r, e_d, N_CONTOURS) {
-            let factor = if hydro <= 0.0 { CONTOUR_DARKEN } else { CONTOUR_DARKEN_WATER };
+            let factor = if is_water { CONTOUR_DARKEN_WATER } else { CONTOUR_DARKEN };
             color = [
                 (color[0] as f64 * factor) as u8,
                 (color[1] as f64 * factor) as u8,
