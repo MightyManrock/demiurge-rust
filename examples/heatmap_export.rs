@@ -948,7 +948,7 @@ fn main() {
         } else if hydro_nearest <= 0.3 {
             true // rivers: hard pixel, no boundary dithering
         } else {
-            const EDGE_COVERAGE: f64 = 0.5;
+            const EDGE_COVERAGE: f64 = 0.2;
             let dx = rx as usize / RENDER_SCALE;
             let dy = ry as usize / RENDER_SCALE;
             let off_x = rx as usize % RENDER_SCALE;
