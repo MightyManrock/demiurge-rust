@@ -103,7 +103,10 @@ impl HeatMap {
 
         // Per land-cell moisture decay and rain-shadow factor.
         const LAND_DECAY: f64 = 0.985;
-        const SLOPE_LOSS: f64 = 3.0;
+        // Only count elevation gain above this floor as a rain shadow — small
+        // FBM noise between adjacent cells should not strip moisture.
+        const SLOPE_THRESHOLD: f64 = 0.015;
+        const SLOPE_LOSS: f64 = 0.5;
         // Minimum precipitation from local convection; keeps interiors non-zero.
         const BASE_ARID: f64 = 0.05;
 
@@ -122,8 +125,9 @@ impl HeatMap {
                     carry = 1.0;
                 } else {
                     let upwind_x = (x + width - 1) % width;
-                    let elev_gain =
-                        (elevation.data[idx] - elevation.data[y * width + upwind_x]).max(0.0);
+                    let raw_gain =
+                        elevation.data[idx] - elevation.data[y * width + upwind_x];
+                    let elev_gain = (raw_gain - SLOPE_THRESHOLD).max(0.0);
                     carry = (carry * LAND_DECAY - elev_gain * SLOPE_LOSS).max(0.0);
                 }
                 if pass_x >= width {
@@ -144,8 +148,9 @@ impl HeatMap {
                     carry = 1.0;
                 } else {
                     let upwind_x = (x + 1) % width;
-                    let elev_gain =
-                        (elevation.data[idx] - elevation.data[y * width + upwind_x]).max(0.0);
+                    let raw_gain =
+                        elevation.data[idx] - elevation.data[y * width + upwind_x];
+                    let elev_gain = (raw_gain - SLOPE_THRESHOLD).max(0.0);
                     carry = (carry * LAND_DECAY - elev_gain * SLOPE_LOSS).max(0.0);
                 }
                 if pass_i >= width {
