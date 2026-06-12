@@ -30,7 +30,7 @@ struct HydrologyParams {
 impl Default for HydrologyParams {
     fn default() -> Self {
         Self {
-            sea_level: 0.4835,
+            sea_level: 0.5,
             max_lake_fill: 0.04,
             aquifer_probability: 0.35,
             river_threshold: 400.0,
@@ -127,10 +127,10 @@ impl HeatMap {
     fn roughen_coastline(&mut self, sea_level: f64, seed: u32) {
         let detail = Fbm::<Perlin>::new(seed);
         // 4× finer than the main terrain scale (3.5) for visible coastal detail.
-        let r = 14.0 / std::f64::consts::TAU;
-        const AMPLITUDE: f64 = 0.025;
+        let r = 50.0 / std::f64::consts::TAU;
+        const AMPLITUDE: f64 = 0.08;
         // Gaussian bandwidth: how far from sea level the effect reaches.
-        const BANDWIDTH: f64 = 0.08;
+        const BANDWIDTH: f64 = 0.05;
 
         let width = self.width;
         let height = self.height;
@@ -823,8 +823,8 @@ fn cell_hash(x: usize, y: usize) -> f64 {
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 fn main() {
-    let width = 1024usize * 2;
-    let height = 512usize * 2;
+    let width = 1024usize * 4;
+    let height = 512usize * 4;
     let seed = 42u32;
 
     let params = HydrologyParams::default();
