@@ -446,6 +446,17 @@ fn main() {
         result.aquifer_zones.len()
     );
 
+    // Raw hydrology: black for dry land, water gradient for wet cells.
+    let hydro_img = ImageBuffer::from_fn(width as u32, height as u32, |x, y| {
+        let nx = x as f64 / width as f64;
+        let ny = y as f64 / height as f64;
+        let hydro = result.map.sample(nx, ny);
+        let color = if hydro > 0.0 { water_color(hydro) } else { [0, 0, 0] };
+        Rgb(color)
+    });
+    hydro_img.save("hydrology.png").expect("failed to save hydrology.png");
+    println!("Saved hydrology.png");
+
     // Composite: elevation as base, water overlay on top.
     let composite = ImageBuffer::from_fn(width as u32, height as u32, |x, y| {
         let nx = x as f64 / width as f64;
