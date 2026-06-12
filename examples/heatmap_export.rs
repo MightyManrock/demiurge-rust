@@ -935,19 +935,34 @@ fn main() {
     let composite = ImageBuffer::from_fn(render_width as u32, render_height as u32, |rx, ry| {
         let nx = rx as f64 / render_width as f64;
         let ny = ry as f64 / render_height as f64;
-        // Classify land vs water using Bayer-dithered coverage at the boundary.
-        // coverage = bilinear/nearest measures how "inside" a water body this
-        // render pixel is (1.0 = deep inside, small = edge pixel). The Bayer
-        // threshold breaks up the rectangular data-pixel edges into a dithered
-        // fringe consistent with the color dithering. Color uses nearest-neighbor
-        // so edge pixels that do classify as water get a proper water color, not
-        // a near-white bilinear blend toward the adjacent land pixel.
+        // Rivers (hydro <= 0.3) render as hard nearest-neighbor pixels — they're
+        // often only one data pixel wide and bilinear dithering erases them.
+        // Lakes and ocean get Bayer-dithered edges: for each of the four cardinal
+        // directions, if the neighboring data pixel is dry land we lower the
+        // coverage threshold so Bayer dithering converts some edge render pixels
+        // to land. Checking all four directions gives symmetric dithering on every
+        // side of the lake, not just right/bottom as bilinear interpolation would.
         let hydro_nearest = result.map.sample_nearest(nx, ny);
         let is_water = if hydro_nearest <= 0.0 {
             false
+        } else if hydro_nearest <= 0.3 {
+            true // rivers: hard pixel, no boundary dithering
         } else {
-            let hydro_bilinear = result.map.sample(nx, ny);
-            let coverage = (hydro_bilinear / hydro_nearest).clamp(0.0, 1.0);
+            const EDGE_COVERAGE: f64 = 0.5;
+            let dx = rx as usize / RENDER_SCALE;
+            let dy = ry as usize / RENDER_SCALE;
+            let off_x = rx as usize % RENDER_SCALE;
+            let off_y = ry as usize % RENDER_SCALE;
+            let neighbor = |ndx: i64, ndy: i64| -> f64 {
+                let nnx = ndx.rem_euclid(width as i64) as usize;
+                let nny = ndy.clamp(0, height as i64 - 1) as usize;
+                result.map.data[nny * width + nnx]
+            };
+            let mut coverage = 1.0f64;
+            if off_x == 0 && neighbor(dx as i64 - 1, dy as i64) <= 0.0 { coverage = EDGE_COVERAGE; }
+            if off_x == 2 && neighbor(dx as i64 + 1, dy as i64) <= 0.0 { coverage = EDGE_COVERAGE; }
+            if off_y == 0 && neighbor(dx as i64, dy as i64 - 1) <= 0.0 { coverage = EDGE_COVERAGE; }
+            if off_y == 2 && neighbor(dx as i64, dy as i64 + 1) <= 0.0 { coverage = EDGE_COVERAGE; }
             BAYER_4X4[ry as usize % 4][rx as usize % 4] < coverage
         };
         let mut color = if is_water {
