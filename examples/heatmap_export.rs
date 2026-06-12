@@ -57,15 +57,27 @@ impl HeatMap {
         let warp_x = Fbm::<Perlin>::new(seed.wrapping_add(1));
         let warp_y = Fbm::<Perlin>::new(seed.wrapping_add(2));
         const WARP_STRENGTH: f64 = 0.2;
+        // x scale (3.5) mapped onto a circle: circumference = 3.5, so radius = 3.5 / 2π.
+        // Sampling in 3D cylindrical coords makes the noise exactly seamless at the x seam.
+        const SCALE_X: f64 = 3.5;
+        const SCALE_Y: f64 = 2.0;
+        let r = SCALE_X / std::f64::consts::TAU;
 
         let mut data = Vec::with_capacity(width * height);
         for y in 0..height {
             for x in 0..width {
-                let nx = x as f64 / width as f64 * 3.5;
-                let ny = y as f64 / height as f64 * 2.0;
-                let dx = warp_x.get([nx, ny]) * WARP_STRENGTH;
-                let dy = warp_y.get([nx + 5.2, ny + 1.3]) * WARP_STRENGTH;
-                data.push(fbm.get([nx + dx, ny + dy]));
+                let angle = x as f64 / width as f64 * std::f64::consts::TAU;
+                let ny = y as f64 / height as f64 * SCALE_Y;
+                let cx = r * angle.cos();
+                let cz = r * angle.sin();
+
+                // Warp fields sampled at cylindrical coords — seamless in x.
+                let wx = warp_x.get([cx, ny, cz]) * WARP_STRENGTH;
+                let wy = warp_y.get([cx + 5.2, ny + 1.3, cz + 3.7]) * WARP_STRENGTH;
+
+                // x warp as angular displacement to stay on the cylinder.
+                let wa = angle + wx / r;
+                data.push(fbm.get([r * wa.cos(), ny + wy, r * wa.sin()]));
             }
         }
 
