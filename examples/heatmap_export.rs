@@ -305,44 +305,11 @@ impl HeatMap {
             }
         }
 
-        // ── Phase 3: Flow accumulation ──────────────────────────────────────
-        //
-        // Process land cells highest-first. Each cell adds its running
-        // accumulation to its downstream neighbor. Cells with high accumulation
-        // are rivers; cells with low accumulation are dry hillsides.
-
-        let mut land_order: Vec<usize> = (0..n).filter(|&i| !is_ocean[i]).collect();
-        land_order.sort_unstable_by(|&a, &b| filled[b].total_cmp(&filled[a]));
-
-        // Weight each cell's flow contribution by its precipitation relative to
-        // the land-wide mean. A desert cell contributes near zero; a rainforest
-        // cell contributes proportionally more. Normalizing by the mean keeps
-        // the accumulation budget compatible with river_threshold unchanged.
-        let land_count = land_order.len();
-        let mean_land_precip = if land_count > 0 {
-            land_order.iter().map(|&i| precipitation.data[i]).sum::<f64>() / land_count as f64
-        } else {
-            1.0
-        };
-        let mut accumulation: Vec<f64> = (0..n)
-            .map(|i| {
-                if is_ocean[i] { 0.0 } else { precipitation.data[i] / mean_land_precip }
-            })
-            .collect();
-        for &idx in &land_order {
-            if let Some(ds) = flow_to[idx] {
-                accumulation[ds] += accumulation[idx];
-            }
-        }
-
-        // ── Phase 4: Per-basin classification ──────────────────────────────
+        // ── Phase 3: Per-basin classification ──────────────────────────────
         //
         // BFS over connected components of lake cells (filled > natural elev).
-        // Each basin is then classified as a unit: if the deepest fill depth in
-        // the basin exceeds max_lake_fill, the WHOLE basin is endorheic — not
-        // just the deep cells. This prevents the circuit-river artifact where a
-        // basin's shallow rim renders as lake while the deep centre renders as
-        // dry, routing the river as a ring around an interior plateau.
+        // Each basin is classified as a unit before outlet routing and flow
+        // accumulation run, so both can use the correct endorheic flags.
 
         let mut basin_id: Vec<Option<usize>> = vec![None; n];
         let mut basins: Vec<Vec<usize>> = Vec::new();
@@ -381,6 +348,102 @@ impl HeatMap {
             })
             .collect();
 
+        // ── Phase 4: Outlet routing ─────────────────────────────────────────
+        //
+        // For each non-endorheic basin, find the single lowest rim cell (the
+        // natural spill point) and BFS outward from it through the lake, forcing
+        // every lake cell's flow_to toward the outlet. Without this, multiple
+        // rim cells at nearly equal elevation all act as outlets simultaneously,
+        // producing diffuse shore seepage rather than one clean river exit.
+
+        let mut outlet_visited = vec![false; n];
+
+        for (id, cells) in basins.iter().enumerate() {
+            if basin_endorheic[id] {
+                continue;
+            }
+
+            // Find the non-lake, non-ocean neighbor with the lowest natural
+            // elevation adjacent to any cell in this basin — the spill point.
+            let mut outlet_lake_cell = usize::MAX;
+            let mut rim_cell = usize::MAX;
+            let mut best_rim_elev = f64::INFINITY;
+
+            for &idx in cells {
+                let cx = idx % width;
+                let cy = idx / width;
+                for (nx, ny) in neighbors_8(cx, cy, width, height) {
+                    let nidx = ny * width + nx;
+                    if !is_lake_cell(nidx) && !is_ocean[nidx] {
+                        let e = elevation.data[nidx];
+                        if e < best_rim_elev {
+                            best_rim_elev = e;
+                            outlet_lake_cell = idx;
+                            rim_cell = nidx;
+                        }
+                    }
+                }
+            }
+
+            if rim_cell == usize::MAX {
+                continue;
+            }
+
+            // Route the outlet lake cell directly to the rim.
+            flow_to[outlet_lake_cell] = Some(rim_cell);
+
+            // BFS outward from the outlet lake cell; each reached cell flows
+            // toward the cell it was reached from (i.e., toward the outlet).
+            outlet_visited[outlet_lake_cell] = true;
+            let mut bfs = VecDeque::new();
+            bfs.push_back(outlet_lake_cell);
+            while let Some(idx) = bfs.pop_front() {
+                let cx = idx % width;
+                let cy = idx / width;
+                for (nx, ny) in neighbors_8(cx, cy, width, height) {
+                    let nidx = ny * width + nx;
+                    if basin_id[nidx] == Some(id) && !outlet_visited[nidx] {
+                        outlet_visited[nidx] = true;
+                        flow_to[nidx] = Some(idx);
+                        bfs.push_back(nidx);
+                    }
+                }
+            }
+
+            // Reset visited flags using the known cell list (O(basin_size)).
+            for &idx in cells {
+                outlet_visited[idx] = false;
+            }
+        }
+
+        // ── Phase 5: Flow accumulation ──────────────────────────────────────
+        //
+        // Process land cells highest-first. Each cell adds its precipitation-
+        // weighted contribution to its downstream neighbor, now using the
+        // outlet-corrected flow_to graph.
+
+        let mut land_order: Vec<usize> = (0..n).filter(|&i| !is_ocean[i]).collect();
+        land_order.sort_unstable_by(|&a, &b| filled[b].total_cmp(&filled[a]));
+
+        let land_count = land_order.len();
+        let mean_land_precip = if land_count > 0 {
+            land_order.iter().map(|&i| precipitation.data[i]).sum::<f64>() / land_count as f64
+        } else {
+            1.0
+        };
+        let mut accumulation: Vec<f64> = (0..n)
+            .map(|i| {
+                if is_ocean[i] { 0.0 } else { precipitation.data[i] / mean_land_precip }
+            })
+            .collect();
+        for &idx in &land_order {
+            if let Some(ds) = flow_to[idx] {
+                accumulation[ds] += accumulation[idx];
+            }
+        }
+
+        // ── Phase 6: Aquifer zone identification ────────────────────────────
+
         let endorheic: Vec<bool> = (0..n)
             .map(|i| match basin_id[i] {
                 Some(id) => basin_endorheic[id],
@@ -397,7 +460,7 @@ impl HeatMap {
             }
         }
 
-        // ── Phase 5: Encode into hydrology HeatMap ──────────────────────────
+        // ── Phase 7: Encode into hydrology HeatMap ──────────────────────────
         //
         // Value ranges:
         //   0.0        = dry land (no water present)
