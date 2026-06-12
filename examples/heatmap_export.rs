@@ -68,7 +68,7 @@ impl HeatMap {
         }
 
         let mut hm = HeatMap { width, height, data };
-        hm.smooth_low_variance(8, 0.005, 0.35);
+        hm.smooth_low_variance(10, 0.001, 0.2);
         hm
     }
 
@@ -664,8 +664,8 @@ fn cell_hash(x: usize, y: usize) -> f64 {
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 fn main() {
-    let width = 1024usize;
-    let height = 512usize;
+    let width = 1024usize * 2;
+    let height = 512usize * 2;
     let seed = 42u32;
 
     println!("Generating {}x{} elevation map (seed {})...", width, height, seed);
