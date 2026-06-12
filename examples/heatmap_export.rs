@@ -54,30 +54,31 @@ impl HeatMap {
         // occasionally produces, which otherwise manifest as ring-shaped trenches
         // that fill with circuit rivers. Spatial offsets (5.2, 1.3) decorrelate
         // the two warp axes from each other and from the main field.
-        let warp_x = Fbm::<Perlin>::new(seed.wrapping_add(1));
-        let warp_y = Fbm::<Perlin>::new(seed.wrapping_add(2));
+        let warp_a = Fbm::<Perlin>::new(seed.wrapping_add(1));
+        let warp_b = Fbm::<Perlin>::new(seed.wrapping_add(2));
+        let warp_c = Fbm::<Perlin>::new(seed.wrapping_add(3));
         const WARP_STRENGTH: f64 = 0.2;
-        // x scale (3.5) mapped onto a circle: circumference = 3.5, so radius = 3.5 / 2π.
-        // Sampling in 3D cylindrical coords makes the noise exactly seamless at the x seam.
-        const SCALE_X: f64 = 3.5;
-        const SCALE_Y: f64 = 2.0;
-        let r = SCALE_X / std::f64::consts::TAU;
+        // Radius so that the equatorial circumference equals 3.5 — preserves
+        // feature frequency at the equator. All three FBM fields are sampled at
+        // the 3D sphere-surface point, making the noise seamless in both x and y
+        // and causing features to converge naturally at the poles.
+        let r = 3.5 / std::f64::consts::TAU;
 
         let mut data = Vec::with_capacity(width * height);
         for y in 0..height {
             for x in 0..width {
-                let angle = x as f64 / width as f64 * std::f64::consts::TAU;
-                let ny = y as f64 / height as f64 * SCALE_Y;
-                let cx = r * angle.cos();
-                let cz = r * angle.sin();
+                let lon = x as f64 / width as f64 * std::f64::consts::TAU;
+                let lat = (y as f64 / height as f64 - 0.5) * std::f64::consts::PI;
+                let cos_lat = lat.cos();
+                let sx = r * cos_lat * lon.cos();
+                let sy = r * cos_lat * lon.sin();
+                let sz = r * lat.sin();
 
-                // Warp fields sampled at cylindrical coords — seamless in x.
-                let wx = warp_x.get([cx, ny, cz]) * WARP_STRENGTH;
-                let wy = warp_y.get([cx + 5.2, ny + 1.3, cz + 3.7]) * WARP_STRENGTH;
-
-                // x warp as angular displacement to stay on the cylinder.
-                let wa = angle + wx / r;
-                data.push(fbm.get([r * wa.cos(), ny + wy, r * wa.sin()]));
+                // All three warp fields sampled at sphere-surface coords.
+                let dx = warp_a.get([sx, sy, sz]) * WARP_STRENGTH;
+                let dy = warp_b.get([sx + 5.2, sy + 1.3, sz + 3.7]) * WARP_STRENGTH;
+                let dz = warp_c.get([sx + 2.8, sy + 4.6, sz + 1.9]) * WARP_STRENGTH;
+                data.push(fbm.get([sx + dx, sy + dy, sz + dz]));
             }
         }
 
