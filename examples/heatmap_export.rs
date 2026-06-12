@@ -30,7 +30,7 @@ struct HydrologyParams {
 impl Default for HydrologyParams {
     fn default() -> Self {
         Self {
-            sea_level: 0.45,
+            sea_level: 0.4835,
             max_lake_fill: 0.04,
             aquifer_probability: 0.35,
             river_threshold: 400.0,
@@ -67,7 +67,34 @@ impl HeatMap {
             *v = (*v - min) / range;
         }
 
-        HeatMap { width, height, data }
+        let mut hm = HeatMap { width, height, data };
+        hm.smooth_low_variance(4, 0.003, 0.5);
+        hm
+    }
+
+    /// Iteratively blends cells toward their neighborhood mean, but only where
+    /// local variance is below the threshold — i.e. flat plains and plateaus.
+    /// High-variance areas (ridgelines, mountain peaks) are left untouched.
+    fn smooth_low_variance(&mut self, passes: usize, variance_threshold: f64, blend: f64) {
+        for _ in 0..passes {
+            let prev = self.data.clone();
+            for y in 0..self.height {
+                for x in 0..self.width {
+                    let idx = y * self.width + x;
+                    let neighbors = neighbors_8(x, y, self.width, self.height);
+                    let n = neighbors.len() as f64;
+                    let vals: Vec<f64> =
+                        neighbors.iter().map(|&(nx, ny)| prev[ny * self.width + nx]).collect();
+                    let mean = vals.iter().sum::<f64>() / n;
+                    let variance =
+                        vals.iter().map(|&v| (v - mean).powi(2)).sum::<f64>() / n;
+                    if variance < variance_threshold {
+                        let neighborhood_mean = (mean * n + prev[idx]) / (n + 1.0);
+                        self.data[idx] = prev[idx] * (1.0 - blend) + neighborhood_mean * blend;
+                    }
+                }
+            }
+        }
     }
 
     /// Latitude cosine + elevation lapse rate. No ocean moderation yet.
