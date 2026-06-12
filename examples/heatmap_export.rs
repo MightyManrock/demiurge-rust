@@ -177,6 +177,7 @@ impl HeatMap {
     fn generate_hydrology(
         elevation: &HeatMap,
         is_ocean: &[bool],
+        precipitation: &HeatMap,
         params: &HydrologyParams,
     ) -> HydrologyResult {
         let width = elevation.width;
@@ -276,7 +277,21 @@ impl HeatMap {
         let mut land_order: Vec<usize> = (0..n).filter(|&i| !is_ocean[i]).collect();
         land_order.sort_unstable_by(|&a, &b| filled[b].total_cmp(&filled[a]));
 
-        let mut accumulation = vec![1.0f64; n];
+        // Weight each cell's flow contribution by its precipitation relative to
+        // the land-wide mean. A desert cell contributes near zero; a rainforest
+        // cell contributes proportionally more. Normalizing by the mean keeps
+        // the accumulation budget compatible with river_threshold unchanged.
+        let land_count = land_order.len();
+        let mean_land_precip = if land_count > 0 {
+            land_order.iter().map(|&i| precipitation.data[i]).sum::<f64>() / land_count as f64
+        } else {
+            1.0
+        };
+        let mut accumulation: Vec<f64> = (0..n)
+            .map(|i| {
+                if is_ocean[i] { 0.0 } else { precipitation.data[i] / mean_land_precip }
+            })
+            .collect();
         for &idx in &land_order {
             if let Some(ds) = flow_to[idx] {
                 accumulation[ds] += accumulation[idx];
@@ -641,7 +656,7 @@ fn main() {
     println!("Saved precipitation.png");
 
     println!("Generating hydrology...");
-    let result = HeatMap::generate_hydrology(&elevation, &is_ocean, &params);
+    let result = HeatMap::generate_hydrology(&elevation, &is_ocean, &precipitation, &params);
     println!(
         "  {} aquifer recharge zones identified",
         result.aquifer_zones.len()
