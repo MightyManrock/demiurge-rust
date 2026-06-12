@@ -664,11 +664,9 @@ fn elevation_color(t: f64) -> [u8; 3] {
     )
 }
 
-/// Terrain color for land in the composite. Elevation is remapped relative
-/// to sea level so the gradient always runs from coast to peak regardless of
-/// where sea level sits.
-fn terrain_color(t: f64, sea_level: f64) -> [u8; 3] {
-    let land_t = ((t - sea_level) / (1.0 - sea_level)).clamp(0.0, 1.0);
+/// Terrain color for land in the composite. Accepts a pre-normalized land_t
+/// in [0, 1] where 0 = coastline and 1 = highest peak.
+fn terrain_color(land_t: f64) -> [u8; 3] {
     sample_gradient(
         land_t,
         &[
@@ -733,6 +731,25 @@ fn precipitation_color(t: f64) -> [u8; 3] {
             ([10, 50, 180], 1.00),   // monsoon / extremely wet
         ],
     )
+}
+
+// ── Dithering ────────────────────────────────────────────────────────────────
+
+const BAYER_4X4: [[f64; 4]; 4] = [
+    [ 0.0 / 16.0,  8.0 / 16.0,  2.0 / 16.0, 10.0 / 16.0],
+    [12.0 / 16.0,  4.0 / 16.0, 14.0 / 16.0,  6.0 / 16.0],
+    [ 3.0 / 16.0, 11.0 / 16.0,  1.0 / 16.0,  9.0 / 16.0],
+    [15.0 / 16.0,  7.0 / 16.0, 13.0 / 16.0,  5.0 / 16.0],
+];
+
+/// Ordered dither: quantize t to n_levels steps, using Bayer threshold at
+/// render pixel (rx, ry) to break ties at level boundaries.
+fn bayer_dither(t: f64, rx: usize, ry: usize, n_levels: usize) -> f64 {
+    let threshold = BAYER_4X4[ry % 4][rx % 4];
+    let scaled = t * n_levels as f64;
+    let lo = scaled.floor();
+    let level = if scaled - lo > threshold { lo + 1.0 } else { lo };
+    (level / n_levels as f64).clamp(0.0, 1.0)
 }
 
 // ── Utilities ────────────────────────────────────────────────────────────────
@@ -823,9 +840,13 @@ fn cell_hash(x: usize, y: usize) -> f64 {
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 fn main() {
-    let width = 1024usize * 4;
-    let height = 512usize * 4;
+    let width = 1024usize;
+    let height = 512usize;
     let seed = 42u32;
+    const RENDER_SCALE: usize = 3;
+    const N_DITHER_LEVELS: usize = 16;
+    let render_width = width * RENDER_SCALE;
+    let render_height = height * RENDER_SCALE;
 
     let params = HydrologyParams::default();
 
@@ -890,15 +911,22 @@ fn main() {
     hydro_img.save("hydrology.png").expect("failed to save hydrology.png");
     println!("Saved hydrology.png");
 
-    // Composite: elevation as base, water overlay on top.
-    let composite = ImageBuffer::from_fn(width as u32, height as u32, |x, y| {
-        let nx = x as f64 / width as f64;
-        let ny = y as f64 / height as f64;
+    // Composite: 3× render resolution with Bayer ordered dithering.
+    // Data pixels are centers of 3×3 render pixel blocks; bilinear interpolation
+    // on the heat maps handles transitions between data points.
+    println!("Rendering composite at {}x{}...", render_width, render_height);
+    let composite = ImageBuffer::from_fn(render_width as u32, render_height as u32, |rx, ry| {
+        let nx = rx as f64 / render_width as f64;
+        let ny = ry as f64 / render_height as f64;
         let hydro = result.map.sample(nx, ny);
         let color = if hydro > 0.0 {
-            water_color(hydro)
+            let d = bayer_dither(hydro, rx as usize, ry as usize, N_DITHER_LEVELS).max(0.01);
+            water_color(d)
         } else {
-            terrain_color(elevation.sample(nx, ny), params.sea_level)
+            let t = elevation.sample(nx, ny);
+            let land_t = ((t - params.sea_level) / (1.0 - params.sea_level)).clamp(0.0, 1.0);
+            let d = bayer_dither(land_t, rx as usize, ry as usize, N_DITHER_LEVELS);
+            terrain_color(d)
         };
         Rgb(color)
     });
