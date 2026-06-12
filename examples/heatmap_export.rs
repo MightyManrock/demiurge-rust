@@ -56,7 +56,7 @@ impl HeatMap {
         // the two warp axes from each other and from the main field.
         let warp_x = Fbm::<Perlin>::new(seed.wrapping_add(1));
         let warp_y = Fbm::<Perlin>::new(seed.wrapping_add(2));
-        const WARP_STRENGTH: f64 = 0.45;
+        const WARP_STRENGTH: f64 = 0.2;
 
         let mut data = Vec::with_capacity(width * height);
         for y in 0..height {
@@ -78,7 +78,7 @@ impl HeatMap {
         }
 
         let mut hm = HeatMap { width, height, data };
-        hm.smooth_low_variance(10, 0.001, 0.2);
+        hm.smooth_low_variance(6, 0.002, 0.25);
         hm
     }
 
