@@ -935,12 +935,23 @@ fn main() {
     let composite = ImageBuffer::from_fn(render_width as u32, render_height as u32, |rx, ry| {
         let nx = rx as f64 / render_width as f64;
         let ny = ry as f64 / render_height as f64;
-        // Nearest-neighbor for classification avoids bilinear-interpolated halos
-        // around water cells that would otherwise render as near-white water color.
-        let is_water = result.map.sample_nearest(nx, ny) > 0.0;
+        // Classify land vs water using Bayer-dithered coverage at the boundary.
+        // coverage = bilinear/nearest measures how "inside" a water body this
+        // render pixel is (1.0 = deep inside, small = edge pixel). The Bayer
+        // threshold breaks up the rectangular data-pixel edges into a dithered
+        // fringe consistent with the color dithering. Color uses nearest-neighbor
+        // so edge pixels that do classify as water get a proper water color, not
+        // a near-white bilinear blend toward the adjacent land pixel.
+        let hydro_nearest = result.map.sample_nearest(nx, ny);
+        let is_water = if hydro_nearest <= 0.0 {
+            false
+        } else {
+            let hydro_bilinear = result.map.sample(nx, ny);
+            let coverage = (hydro_bilinear / hydro_nearest).clamp(0.0, 1.0);
+            BAYER_4X4[ry as usize % 4][rx as usize % 4] < coverage
+        };
         let mut color = if is_water {
-            let hydro = result.map.sample(nx, ny);
-            let d = bayer_dither(hydro, rx as usize, ry as usize, N_DITHER_LEVELS).max(0.01);
+            let d = bayer_dither(hydro_nearest, rx as usize, ry as usize, N_DITHER_LEVELS).max(0.01);
             water_color(d)
         } else {
             let t = elevation.sample(nx, ny);
