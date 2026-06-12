@@ -120,6 +120,41 @@ impl HeatMap {
         }
     }
 
+    /// Adds high-frequency detail noise near sea level, producing jagged
+    /// coastlines — cliffs, inlets, sea stacks — from cells just above or below
+    /// the waterline being nudged across it. Uses spherical sampling so the
+    /// detail is seamless. Must be called before flood_fill_ocean.
+    fn roughen_coastline(&mut self, sea_level: f64, seed: u32) {
+        let detail = Fbm::<Perlin>::new(seed);
+        // 4× finer than the main terrain scale (3.5) for visible coastal detail.
+        let r = 14.0 / std::f64::consts::TAU;
+        const AMPLITUDE: f64 = 0.025;
+        // Gaussian bandwidth: how far from sea level the effect reaches.
+        const BANDWIDTH: f64 = 0.08;
+
+        let width = self.width;
+        let height = self.height;
+        for y in 0..height {
+            for x in 0..width {
+                let idx = y * width + x;
+                let elev = self.data[idx];
+                let dist = elev - sea_level;
+                let weight = (-(dist * dist) / (2.0 * BANDWIDTH * BANDWIDTH)).exp();
+                if weight < 0.01 {
+                    continue;
+                }
+                let lon = x as f64 / width as f64 * std::f64::consts::TAU;
+                let lat = (y as f64 / height as f64 - 0.5) * std::f64::consts::PI;
+                let cos_lat = lat.cos();
+                let sx = r * cos_lat * lon.cos();
+                let sy = r * cos_lat * lon.sin();
+                let sz = r * lat.sin();
+                let noise = detail.get([sx, sy, sz]);
+                self.data[idx] = (elev + noise * AMPLITUDE * weight).clamp(0.0, 1.0);
+            }
+        }
+    }
+
     /// Latitude cosine + elevation lapse rate. No ocean moderation yet.
     fn generate_temperature(elevation: &HeatMap) -> HeatMap {
         let width = elevation.width;
@@ -792,8 +827,11 @@ fn main() {
     let height = 512usize * 2;
     let seed = 42u32;
 
+    let params = HydrologyParams::default();
+
     println!("Generating {}x{} elevation map (seed {})...", width, height, seed);
-    let elevation = HeatMap::generate_elevation(width, height, seed);
+    let mut elevation = HeatMap::generate_elevation(width, height, seed);
+    elevation.roughen_coastline(params.sea_level, seed.wrapping_add(10));
 
     let elev_img = ImageBuffer::from_fn(width as u32, height as u32, |x, y| {
         let nx = x as f64 / width as f64;
@@ -804,7 +842,6 @@ fn main() {
     println!("Saved elevation.png");
 
     // Ocean classification is shared by climate and hydrology.
-    let params = HydrologyParams::default();
     let is_ocean = flood_fill_ocean(&elevation.data, width, height, params.sea_level);
 
     println!("Generating climate...");
