@@ -839,6 +839,16 @@ fn neighbors_8(x: usize, y: usize, width: usize, height: usize) -> Vec<(usize, u
     result
 }
 
+/// Fold a 128-bit UUID down to a u32 noise seed by XORing its four 32-bit
+/// words. Uses all 128 bits so any change to the UUID changes the seed.
+fn seed_from_uuid(bytes: [u8; 16]) -> u32 {
+    let a = u32::from_le_bytes(bytes[0..4].try_into().unwrap());
+    let b = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
+    let c = u32::from_le_bytes(bytes[8..12].try_into().unwrap());
+    let d = u32::from_le_bytes(bytes[12..16].try_into().unwrap());
+    a ^ b ^ c ^ d
+}
+
 /// Deterministic per-cell pseudo-random value in [0, 1).
 /// Used to assign aquifer vs terminal outcome for endorheic basins.
 fn cell_hash(x: usize, y: usize) -> f64 {
@@ -856,7 +866,13 @@ fn cell_hash(x: usize, y: usize) -> f64 {
 fn main() {
     let width = 1024usize;
     let height = 512usize;
-    let seed = 42u32;
+
+    // Placeholder — swap in the real planet UUID when generation is wired up.
+    let planet_uuid: [u8; 16] = [
+        0x6b, 0xa7, 0xb8, 0x10, 0x9d, 0xad, 0x11, 0xd1,
+        0x80, 0xb4, 0x00, 0xc0, 0x4f, 0xd4, 0x30, 0xc8,
+    ];
+    let seed = seed_from_uuid(planet_uuid);
     const RENDER_SCALE: usize = 3;
     const N_DITHER_LEVELS: usize = 16;
     let render_width = width * RENDER_SCALE;
