@@ -841,6 +841,14 @@ fn main() {
     elev_img.save("elevation.png").expect("failed to save elevation.png");
     println!("Saved elevation.png");
 
+    let height_img = ImageBuffer::from_fn(width as u32, height as u32, |x, y| {
+        let v = (elevation.sample(x as f64 / width as f64, y as f64 / height as f64) * 255.0)
+            .round() as u8;
+        Rgb([v, v, v])
+    });
+    height_img.save("heightmap.png").expect("failed to save heightmap.png");
+    println!("Saved heightmap.png");
+
     // Ocean classification is shared by climate and hydrology.
     let is_ocean = flood_fill_ocean(&elevation.data, width, height, params.sea_level);
 
