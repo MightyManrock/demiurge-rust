@@ -49,13 +49,23 @@ struct HydrologyResult {
 impl HeatMap {
     fn generate_elevation(width: usize, height: usize, seed: u32) -> Self {
         let fbm = Fbm::<Perlin>::new(seed);
+        // Two decorrelated FBM fields warp the sample coordinates before the
+        // main noise is read. This breaks up annular saddle features that FBM
+        // occasionally produces, which otherwise manifest as ring-shaped trenches
+        // that fill with circuit rivers. Spatial offsets (5.2, 1.3) decorrelate
+        // the two warp axes from each other and from the main field.
+        let warp_x = Fbm::<Perlin>::new(seed.wrapping_add(1));
+        let warp_y = Fbm::<Perlin>::new(seed.wrapping_add(2));
+        const WARP_STRENGTH: f64 = 0.45;
 
         let mut data = Vec::with_capacity(width * height);
         for y in 0..height {
             for x in 0..width {
                 let nx = x as f64 / width as f64 * 3.5;
                 let ny = y as f64 / height as f64 * 2.0;
-                data.push(fbm.get([nx, ny]));
+                let dx = warp_x.get([nx, ny]) * WARP_STRENGTH;
+                let dy = warp_y.get([nx + 5.2, ny + 1.3]) * WARP_STRENGTH;
+                data.push(fbm.get([nx + dx, ny + dy]));
             }
         }
 
