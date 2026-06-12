@@ -70,18 +70,113 @@ impl HeatMap {
         HeatMap { width, height, data }
     }
 
-    fn generate_hydrology(elevation: &HeatMap, params: &HydrologyParams) -> HydrologyResult {
+    /// Latitude cosine + elevation lapse rate. No ocean moderation yet.
+    fn generate_temperature(elevation: &HeatMap) -> HeatMap {
+        let width = elevation.width;
+        let height = elevation.height;
+        const LAPSE_FACTOR: f64 = 0.3;
+
+        let data = (0..width * height)
+            .map(|idx| {
+                let y = idx / width;
+                let abs_lat =
+                    (y as f64 - height as f64 / 2.0).abs() / (height as f64 / 2.0);
+                let lat_base = (abs_lat * std::f64::consts::FRAC_PI_2).cos();
+                (lat_base - elevation.data[idx] * LAPSE_FACTOR).clamp(0.0, 1.0)
+            })
+            .collect();
+
+        HeatMap { width, height, data }
+    }
+
+    /// Atmospheric band function + row-sweep moisture advection + rain shadow.
+    ///
+    /// Two moisture fields are accumulated via double-pass row sweeps (one for
+    /// westerlies, one for easterlies) and blended by a latitude-dependent
+    /// westerly weight. The double-pass handles the east-west seam: carry from
+    /// the end of each row's first pass seeds the second pass, so moisture
+    /// wraps around the globe correctly.
+    fn generate_precipitation(elevation: &HeatMap, is_ocean: &[bool]) -> HeatMap {
         let width = elevation.width;
         let height = elevation.height;
         let n = width * height;
 
-        // ── Ocean flood-fill ─────────────────────────────────────────────────
-        //
-        // Rather than treating every cell below sea level as ocean, we BFS from
-        // the global minimum and spread only to connected cells below sea level.
-        // Any below-sea-level area not reachable from the lowest point is an
-        // inland basin (dead sea, salt flat) — not ocean.
-        let is_ocean = flood_fill_ocean(&elevation.data, width, height, params.sea_level);
+        // Per land-cell moisture decay and rain-shadow factor.
+        const LAND_DECAY: f64 = 0.985;
+        const SLOPE_LOSS: f64 = 3.0;
+        // Minimum precipitation from local convection; keeps interiors non-zero.
+        const BASE_ARID: f64 = 0.05;
+
+        let mut moisture_west = vec![0.0f64; n];
+        let mut moisture_east = vec![0.0f64; n];
+
+        // Westerly sweep: wind from west, moisture moves east.
+        // Scan x=0→width-1 twice; second pass starts with carry from the end of
+        // the first, so x=0 correctly inherits moisture wrapping from x=width-1.
+        for y in 0..height {
+            let mut carry = 0.0f64;
+            for pass_x in 0..(width * 2) {
+                let x = pass_x % width;
+                let idx = y * width + x;
+                if is_ocean[idx] {
+                    carry = 1.0;
+                } else {
+                    let upwind_x = (x + width - 1) % width;
+                    let elev_gain =
+                        (elevation.data[idx] - elevation.data[y * width + upwind_x]).max(0.0);
+                    carry = (carry * LAND_DECAY - elev_gain * SLOPE_LOSS).max(0.0);
+                }
+                if pass_x >= width {
+                    moisture_west[idx] = carry;
+                }
+            }
+        }
+
+        // Easterly sweep: wind from east, moisture moves west.
+        // Scan x=width-1→0 twice; second pass starts with carry from x=0
+        // so x=width-1 correctly inherits moisture wrapping from x=0.
+        for y in 0..height {
+            let mut carry = 0.0f64;
+            for pass_i in 0..(width * 2) {
+                let x = (width - 1) - (pass_i % width);
+                let idx = y * width + x;
+                if is_ocean[idx] {
+                    carry = 1.0;
+                } else {
+                    let upwind_x = (x + 1) % width;
+                    let elev_gain =
+                        (elevation.data[idx] - elevation.data[y * width + upwind_x]).max(0.0);
+                    carry = (carry * LAND_DECAY - elev_gain * SLOPE_LOSS).max(0.0);
+                }
+                if pass_i >= width {
+                    moisture_east[idx] = carry;
+                }
+            }
+        }
+
+        let data = (0..n)
+            .map(|idx| {
+                let y = idx / width;
+                let abs_lat =
+                    (y as f64 - height as f64 / 2.0).abs() / (height as f64 / 2.0);
+                let w = westerly_weight(abs_lat);
+                let moisture = moisture_west[idx] * w + moisture_east[idx] * (1.0 - w);
+                let band = lat_band_factor(abs_lat);
+                (band * (BASE_ARID + moisture * (1.0 - BASE_ARID))).clamp(0.0, 1.0)
+            })
+            .collect();
+
+        HeatMap { width, height, data }
+    }
+
+    fn generate_hydrology(
+        elevation: &HeatMap,
+        is_ocean: &[bool],
+        params: &HydrologyParams,
+    ) -> HydrologyResult {
+        let width = elevation.width;
+        let height = elevation.height;
+        let n = width * height;
 
         // ── Phase 1: Priority-flood depression filling ───────────────────────
         //
@@ -173,9 +268,7 @@ impl HeatMap {
         // accumulation to its downstream neighbor. Cells with high accumulation
         // are rivers; cells with low accumulation are dry hillsides.
 
-        let mut land_order: Vec<usize> = (0..n)
-            .filter(|&i| !is_ocean[i])
-            .collect();
+        let mut land_order: Vec<usize> = (0..n).filter(|&i| !is_ocean[i]).collect();
         land_order.sort_unstable_by(|&a, &b| filled[b].total_cmp(&filled[a]));
 
         let mut accumulation = vec![1.0f64; n];
@@ -195,17 +288,10 @@ impl HeatMap {
         // out). Both outcomes are placeholders: the real split should come from
         // climate (aridity → more dry sinks) and geology data once those maps
         // exist.
-        //
-        // Note: the endorheic check is per-cell rather than per-basin. This
-        // means a large deep lake appears as shallow water at its rim and dry
-        // at its floor, which is a simplification. Per-basin classification
-        // requires connected-component analysis and can be refined later.
 
         let mut aquifer_zones = Vec::new();
         let endorheic: Vec<bool> = (0..n)
-            .map(|i| {
-                !is_ocean[i] && filled[i] - elevation.data[i] > params.max_lake_fill
-            })
+            .map(|i| !is_ocean[i] && filled[i] - elevation.data[i] > params.max_lake_fill)
             .collect();
 
         for idx in 0..n {
@@ -281,6 +367,63 @@ impl HeatMap {
     }
 }
 
+// ── Climate helpers ──────────────────────────────────────────────────────────
+
+/// Latitude precipitation factor based on Earth's general circulation bands.
+/// Returns a [0, 1] multiplier applied before moisture weighting.
+fn lat_band_factor(abs_lat: f64) -> f64 {
+    // Piecewise linear through calibrated breakpoints:
+    //   equator: 1.0 (ITCZ)
+    //   ~30°:    0.2 (subtropical desert)
+    //   ~50°:    0.6 (mid-lat cyclone belt)
+    //   ~60°:    0.65 (mid-lat peak)
+    //   ~70°:    0.3 (sub-polar)
+    //   ~90°:    0.1 (polar desert)
+    let stops: &[(f64, f64)] = &[
+        (0.00, 1.00),
+        (0.17, 0.90),
+        (0.33, 0.20),
+        (0.50, 0.60),
+        (0.65, 0.65),
+        (0.78, 0.30),
+        (1.00, 0.10),
+    ];
+    for i in 0..stops.len() - 1 {
+        let (ta, va) = stops[i];
+        let (tb, vb) = stops[i + 1];
+        if abs_lat <= tb {
+            let t = (abs_lat - ta) / (tb - ta);
+            return va + (vb - va) * t;
+        }
+    }
+    stops.last().unwrap().1
+}
+
+/// Fraction of moisture contributed by the westerly sweep vs easterly sweep.
+/// 1.0 = pure westerlies, 0.0 = pure easterlies.
+fn westerly_weight(abs_lat: f64) -> f64 {
+    // Westerlies dominate in mid-latitudes (~35–65°, abs_lat ~0.4–0.72).
+    // Easterlies dominate in tropics and polar regions.
+    let stops: &[(f64, f64)] = &[
+        (0.00, 0.00),
+        (0.25, 0.10),
+        (0.40, 0.70),
+        (0.55, 1.00),
+        (0.70, 0.70),
+        (0.78, 0.10),
+        (1.00, 0.00),
+    ];
+    for i in 0..stops.len() - 1 {
+        let (ta, va) = stops[i];
+        let (tb, vb) = stops[i + 1];
+        if abs_lat <= tb {
+            let t = (abs_lat - ta) / (tb - ta);
+            return va + (vb - va) * t;
+        }
+    }
+    stops.last().unwrap().1
+}
+
 // ── Color functions ──────────────────────────────────────────────────────────
 
 fn lerp_color(a: [u8; 3], b: [u8; 3], t: f64) -> [u8; 3] {
@@ -331,6 +474,36 @@ fn water_color(t: f64) -> [u8; 3] {
             ([40, 130, 190], 0.50),  // deep lake / sea level
             ([30, 90, 180], 0.70),   // open ocean
             ([15, 40, 100], 1.00),   // deep ocean
+        ],
+    )
+}
+
+/// Temperature gradient: deep blue (coldest) → cyan → pale green → yellow → orange → deep red.
+fn temperature_color(t: f64) -> [u8; 3] {
+    sample_gradient(
+        t,
+        &[
+            ([20, 20, 150], 0.00),   // arctic/polar
+            ([70, 170, 230], 0.20),  // cold
+            ([170, 220, 200], 0.40), // temperate cool
+            ([240, 220, 130], 0.60), // warm
+            ([230, 120, 30], 0.80),  // hot
+            ([180, 20, 20], 1.00),   // extreme heat
+        ],
+    )
+}
+
+/// Precipitation gradient: tan (arid) → pale green → green → dark green → blue (extremely wet).
+fn precipitation_color(t: f64) -> [u8; 3] {
+    sample_gradient(
+        t,
+        &[
+            ([210, 180, 130], 0.00), // hyperarid
+            ([180, 200, 140], 0.20), // semi-arid
+            ([100, 180, 100], 0.40), // moderate
+            ([40, 130, 60], 0.60),   // wet
+            ([20, 90, 130], 0.80),   // very wet
+            ([10, 50, 180], 1.00),   // monsoon / extremely wet
         ],
     )
 }
@@ -438,9 +611,32 @@ fn main() {
     elev_img.save("elevation.png").expect("failed to save elevation.png");
     println!("Saved elevation.png");
 
-    println!("Generating hydrology...");
+    // Ocean classification is shared by climate and hydrology.
     let params = HydrologyParams::default();
-    let result = HeatMap::generate_hydrology(&elevation, &params);
+    let is_ocean = flood_fill_ocean(&elevation.data, width, height, params.sea_level);
+
+    println!("Generating climate...");
+    let temperature = HeatMap::generate_temperature(&elevation);
+    let precipitation = HeatMap::generate_precipitation(&elevation, &is_ocean);
+
+    let temp_img = ImageBuffer::from_fn(width as u32, height as u32, |x, y| {
+        let nx = x as f64 / width as f64;
+        let ny = y as f64 / height as f64;
+        Rgb(temperature_color(temperature.sample(nx, ny)))
+    });
+    temp_img.save("temperature.png").expect("failed to save temperature.png");
+    println!("Saved temperature.png");
+
+    let precip_img = ImageBuffer::from_fn(width as u32, height as u32, |x, y| {
+        let nx = x as f64 / width as f64;
+        let ny = y as f64 / height as f64;
+        Rgb(precipitation_color(precipitation.sample(nx, ny)))
+    });
+    precip_img.save("precipitation.png").expect("failed to save precipitation.png");
+    println!("Saved precipitation.png");
+
+    println!("Generating hydrology...");
+    let result = HeatMap::generate_hydrology(&elevation, &is_ocean, &params);
     println!(
         "  {} aquifer recharge zones identified",
         result.aquifer_zones.len()
@@ -472,4 +668,3 @@ fn main() {
     composite.save("composite.png").expect("failed to save composite.png");
     println!("Saved composite.png");
 }
-
