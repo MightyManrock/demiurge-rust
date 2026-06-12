@@ -335,22 +335,60 @@ impl HeatMap {
             }
         }
 
-        // ── Phase 4: Classify cells and identify aquifer zones ──────────────
+        // ── Phase 4: Per-basin classification ──────────────────────────────
         //
-        // A cell whose filled elevation exceeds its natural elevation by more
-        // than max_lake_fill is in a basin too deep to form a surface lake —
-        // it becomes endorheic. Among cells that collected significant flow
-        // before going endorheic, some become aquifer recharge zones (water
-        // sinks underground) and the rest are terminal dry sinks (water runs
-        // out). Both outcomes are placeholders: the real split should come from
-        // climate (aridity → more dry sinks) and geology data once those maps
-        // exist.
+        // BFS over connected components of lake cells (filled > natural elev).
+        // Each basin is then classified as a unit: if the deepest fill depth in
+        // the basin exceeds max_lake_fill, the WHOLE basin is endorheic — not
+        // just the deep cells. This prevents the circuit-river artifact where a
+        // basin's shallow rim renders as lake while the deep centre renders as
+        // dry, routing the river as a ring around an interior plateau.
 
-        let mut aquifer_zones = Vec::new();
-        let endorheic: Vec<bool> = (0..n)
-            .map(|i| !is_ocean[i] && filled[i] - elevation.data[i] > params.max_lake_fill)
+        let mut basin_id: Vec<Option<usize>> = vec![None; n];
+        let mut basins: Vec<Vec<usize>> = Vec::new();
+
+        for start in 0..n {
+            if !is_lake_cell(start) || basin_id[start].is_some() || is_ocean[start] {
+                continue;
+            }
+            let id = basins.len();
+            basins.push(Vec::new());
+            let mut bfs = VecDeque::new();
+            bfs.push_back(start);
+            basin_id[start] = Some(id);
+            while let Some(idx) = bfs.pop_front() {
+                basins[id].push(idx);
+                let cx = idx % width;
+                let cy = idx / width;
+                for (nx, ny) in neighbors_8(cx, cy, width, height) {
+                    let nidx = ny * width + nx;
+                    if is_lake_cell(nidx) && basin_id[nidx].is_none() && !is_ocean[nidx] {
+                        basin_id[nidx] = Some(id);
+                        bfs.push_back(nidx);
+                    }
+                }
+            }
+        }
+
+        let basin_endorheic: Vec<bool> = basins
+            .iter()
+            .map(|cells| {
+                cells
+                    .iter()
+                    .map(|&i| filled[i] - elevation.data[i])
+                    .fold(0.0f64, f64::max)
+                    > params.max_lake_fill
+            })
             .collect();
 
+        let endorheic: Vec<bool> = (0..n)
+            .map(|i| match basin_id[i] {
+                Some(id) => basin_endorheic[id],
+                None => false,
+            })
+            .collect();
+
+        let mut aquifer_zones = Vec::new();
         for idx in 0..n {
             if endorheic[idx] && accumulation[idx] >= params.river_threshold {
                 if cell_hash(idx % width, idx / width) < params.aquifer_probability {
