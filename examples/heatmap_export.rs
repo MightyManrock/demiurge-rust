@@ -922,7 +922,8 @@ fn main() {
     // topographic contour lines. Contours are detected by checking whether
     // adjacent render pixels straddle an elevation level boundary.
     const N_CONTOURS: usize = 40;
-    const CONTOUR_DARKEN: f64 = 0.70;
+    const CONTOUR_DARKEN: f64 = 0.90;
+    const CONTOUR_DARKEN_WATER: f64 = 0.95;
     println!("Rendering composite at {}x{}...", render_width, render_height);
     let composite = ImageBuffer::from_fn(render_width as u32, render_height as u32, |rx, ry| {
         let nx = rx as f64 / render_width as f64;
@@ -937,19 +938,18 @@ fn main() {
             let d = bayer_dither(land_t, rx as usize, ry as usize, N_DITHER_LEVELS);
             terrain_color(d)
         };
-        if hydro <= 0.0 {
-            let nx_r = (rx as usize + 1) as f64 / render_width as f64;
-            let ny_d = (ry as usize + 1) as f64 / render_height as f64;
-            let e = elevation.sample(nx, ny);
-            let e_r = elevation.sample(nx_r, ny);
-            let e_d = elevation.sample(nx, ny_d);
-            if is_contour(e, e_r, e_d, N_CONTOURS) {
-                color = [
-                    (color[0] as f64 * CONTOUR_DARKEN) as u8,
-                    (color[1] as f64 * CONTOUR_DARKEN) as u8,
-                    (color[2] as f64 * CONTOUR_DARKEN) as u8,
-                ];
-            }
+        let nx_r = (rx as usize + 1) as f64 / render_width as f64;
+        let ny_d = (ry as usize + 1) as f64 / render_height as f64;
+        let e = elevation.sample(nx, ny);
+        let e_r = elevation.sample(nx_r, ny);
+        let e_d = elevation.sample(nx, ny_d);
+        if is_contour(e, e_r, e_d, N_CONTOURS) {
+            let factor = if hydro <= 0.0 { CONTOUR_DARKEN } else { CONTOUR_DARKEN_WATER };
+            color = [
+                (color[0] as f64 * factor) as u8,
+                (color[1] as f64 * factor) as u8,
+                (color[2] as f64 * factor) as u8,
+            ];
         }
         Rgb(color)
     });
