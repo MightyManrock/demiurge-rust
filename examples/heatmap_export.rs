@@ -68,7 +68,7 @@ impl HeatMap {
         }
 
         let mut hm = HeatMap { width, height, data };
-        hm.smooth_low_variance(4, 0.003, 0.5);
+        hm.smooth_low_variance(8, 0.005, 0.35);
         hm
     }
 
@@ -505,6 +505,27 @@ fn elevation_color(t: f64) -> [u8; 3] {
     )
 }
 
+/// Terrain color for land in the composite. Elevation is remapped relative
+/// to sea level so the gradient always runs from coast to peak regardless of
+/// where sea level sits.
+fn terrain_color(t: f64, sea_level: f64) -> [u8; 3] {
+    let land_t = ((t - sea_level) / (1.0 - sea_level)).clamp(0.0, 1.0);
+    sample_gradient(
+        land_t,
+        &[
+            ([220, 200, 150], 0.00), // coastal sand / beach
+            ([180, 210, 120], 0.05), // lowland
+            ([120, 175, 80], 0.20),  // plains / grassland
+            ([80, 140, 60], 0.40),   // forest / hills
+            ([110, 120, 70], 0.60),  // highland
+            ([140, 110, 80], 0.75),  // rocky terrain
+            ([170, 160, 150], 0.88), // grey rock
+            ([230, 235, 240], 0.95), // snow line
+            ([255, 255, 255], 1.00), // peak snow
+        ],
+    )
+}
+
 /// Water depth gradient covering rivers, lakes, and ocean.
 ///
 /// Range mapping:
@@ -708,7 +729,7 @@ fn main() {
         let color = if hydro > 0.0 {
             water_color(hydro)
         } else {
-            elevation_color(elevation.sample(nx, ny))
+            terrain_color(elevation.sample(nx, ny), params.sea_level)
         };
         Rgb(color)
     });
