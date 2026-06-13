@@ -60,43 +60,43 @@ pub enum VirtueTrait {
 impl VirtueTrait {
     fn name(&self) -> &'static str {
         match self {
-            Self::Hierarchy => "Hierarchy",
-            Self::Meritocracy => "Meritocracy",
-            Self::Solidarity => "Solidarity",
-            Self::Sedentism => "Sedentism",
-            Self::Xenophilia => "Xenophilia",
-            Self::Erudition => "Erudition",
-            Self::Pragmatism => "Pragmatism",
-            Self::Tradition => "Tradition",
-            Self::Honor => "Honor",
-            Self::Sincerity => "Sincerity",
-            Self::Humility => "Humility",
-            Self::Wit => "Wit",
-            Self::Patience => "Patience",
-            Self::Adaptability => "Adaptability",
-            Self::Moderation => "Moderation",
-            Self::Prosperity => "Prosperity",
+            Self::Hierarchy     => "Hierarchy",
+            Self::Meritocracy   => "Meritocracy",
+            Self::Solidarity    => "Solidarity",
+            Self::Sedentism     => "Sedentism",
+            Self::Xenophilia    => "Xenophilia",
+            Self::Erudition     => "Erudition",
+            Self::Pragmatism    => "Pragmatism",
+            Self::Tradition     => "Tradition",
+            Self::Honor         => "Honor",
+            Self::Sincerity     => "Sincerity",
+            Self::Humility      => "Humility",
+            Self::Wit           => "Wit",
+            Self::Patience      => "Patience",
+            Self::Adaptability  => "Adaptability",
+            Self::Moderation    => "Moderation",
+            Self::Prosperity    => "Prosperity",
         }
     }
 
     fn antonym(&self) -> &'static str {
         match self {
-            Self::Hierarchy => "Egalitarianism",
-            Self::Meritocracy => "Equity",
-            Self::Solidarity => "Autonomy",
-            Self::Sedentism => "Nomadism",
-            Self::Xenophilia => "Xenophobia",
-            Self::Erudition => "Folk Wisdom",
-            Self::Pragmatism => "Idealism",
-            Self::Tradition => "Innovation",
-            Self::Honor => "Opportunism",
-            Self::Sincerity => "Stoicism",
-            Self::Humility => "Prowess",
-            Self::Wit => "Solemnity",
-            Self::Patience => "Tenacity",
-            Self::Adaptability => "Constancy",
-            Self::Moderation => "Indulgence",
-            Self::Prosperity => "Charity",
+            Self::Hierarchy     => "Egalitarianism",
+            Self::Meritocracy   => "Equity",
+            Self::Solidarity    => "Autonomy",
+            Self::Sedentism     => "Nomadism",
+            Self::Xenophilia    => "Xenophobia",
+            Self::Erudition     => "Folk Wisdom",
+            Self::Pragmatism    => "Idealism",
+            Self::Tradition     => "Innovation",
+            Self::Honor         => "Opportunism",
+            Self::Sincerity     => "Stoicism",
+            Self::Humility      => "Prowess",
+            Self::Wit           => "Solemnity",
+            Self::Patience      => "Tenacity",
+            Self::Adaptability  => "Constancy",
+            Self::Moderation    => "Indulgence",
+            Self::Prosperity    => "Charity",
         }
     }
 }
@@ -110,8 +110,8 @@ pub enum VirtueTag {
 impl fmt::Display for VirtueTag {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Positive(t) => write!(f, "{}", t.name().to_lowercase()),
-            Self::Negative(t) => write!(f, "{}", t.antonym().to_lowercase()),
+            Self::Positive(t) => write!(f, "{}", t.name()),
+            Self::Negative(t) => write!(f, "{}", t.antonym()),
         }
     }
 }

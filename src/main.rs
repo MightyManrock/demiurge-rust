@@ -19,7 +19,7 @@ fn main() {
         origin_world_id: Uuid::new_v4(),
         sentience: Some(bio::SpeciesSentience::Sapient),
         basis: bio::LifeBasis::Carbon,
-        solvent: bio::Solvent::Water,
+        solvent: universe::LiquidTag::Water,
         atmo_aff: vec![
             bio::AtmosphereAffinity {
                 tag: Some(universe::AtmosphereTag::Oxygen),

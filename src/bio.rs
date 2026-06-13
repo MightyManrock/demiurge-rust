@@ -2,7 +2,7 @@ use serde::{Serialize, Deserialize};
 use uuid::Uuid;
 
 use crate::common::Range;
-use crate::universe::AtmosphereTag;
+use crate::universe::{AtmosphereTag, LiquidTag};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum SpeciesKind {
@@ -25,18 +25,6 @@ pub enum LifeBasis {
     Borane,
     Sulfur,
     Phosphorus,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub enum Solvent {
-    Water,
-    Ammonia,
-    Methane,
-    HydrogenFluoride,
-    HydrogenSulfide,
-    SiliconDioxide,
-    SulfuricAcid,
-    Formamide,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -117,7 +105,7 @@ pub struct Species {
     pub origin_world_id: Uuid,
     pub sentience: Option<SpeciesSentience>,
     pub basis: LifeBasis,
-    pub solvent: Solvent,
+    pub solvent: LiquidTag,
     pub atmo_aff: Vec<AtmosphereAffinity>,
     pub food_tag: Vec<FoodTag>,
     pub repro_profile: ReproductionProfile,

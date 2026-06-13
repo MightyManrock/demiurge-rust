@@ -114,6 +114,18 @@ pub enum AtmosphereTag {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub enum LiquidTag {
+    Water,
+    Ammonia,
+    Methane,
+    HydrogenFluoride,
+    HydrogenSulfide,
+    SiliconDioxide,
+    SulfuricAcid,
+    Formamide,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub enum GeoTag {
       Oceanic,
       Arid,
