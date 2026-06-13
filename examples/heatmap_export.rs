@@ -181,7 +181,7 @@ impl HeatMap {
     /// westerly weight. The double-pass handles the east-west seam: carry from
     /// the end of each row's first pass seeds the second pass, so moisture
     /// wraps around the globe correctly.
-    fn generate_precipitation(elevation: &HeatMap, is_ocean: &[bool]) -> HeatMap {
+    fn generate_precipitation(elevation: &HeatMap, is_ocean: &[bool], temperature: &HeatMap) -> HeatMap {
         let width = elevation.width;
         let height = elevation.height;
         let n = width * height;
@@ -244,6 +244,9 @@ impl HeatMap {
             }
         }
 
+        // Cold air holds less moisture: this dampens precipitation at high latitudes
+        // and high altitudes independently of the circulation band factor.
+        // Range: 0.3 (arctic) → 1.0 (tropical), so even the coldest cells get some snowfall.
         let data = (0..n)
             .map(|idx| {
                 let y = idx / width;
@@ -252,7 +255,8 @@ impl HeatMap {
                 let w = westerly_weight(abs_lat);
                 let moisture = moisture_west[idx] * w + moisture_east[idx] * (1.0 - w);
                 let band = lat_band_factor(abs_lat);
-                (band * (BASE_ARID + moisture * (1.0 - BASE_ARID))).clamp(0.0, 1.0)
+                let moisture_capacity = (0.3 + 0.7 * temperature.data[idx]).clamp(0.3, 1.0);
+                (band * (BASE_ARID + moisture * (1.0 - BASE_ARID)) * moisture_capacity).clamp(0.0, 1.0)
             })
             .collect();
 
@@ -263,6 +267,7 @@ impl HeatMap {
         elevation: &HeatMap,
         is_ocean: &[bool],
         precipitation: &HeatMap,
+        is_glacier: &[bool],
         params: &HydrologyParams,
     ) -> HydrologyResult {
         let width = elevation.width;
@@ -479,9 +484,14 @@ impl HeatMap {
         } else {
             1.0
         };
+        // Glacier cells contribute extra flow representing meltwater. The bonus
+        // is multiplicative so high-precip glaciers (wet snowfields) feed larger rivers.
+        const GLACIER_MELT_FACTOR: f64 = 2.5;
         let mut accumulation: Vec<f64> = (0..n)
             .map(|i| {
-                if is_ocean[i] { 0.0 } else { precipitation.data[i] / mean_land_precip }
+                if is_ocean[i] { return 0.0; }
+                let base = precipitation.data[i] / mean_land_precip;
+                if is_glacier[i] { base * GLACIER_MELT_FACTOR } else { base }
             })
             .collect();
         for &idx in &land_order {
@@ -547,6 +557,17 @@ impl HeatMap {
             map: HeatMap { width, height, data },
             aquifer_zones,
         }
+    }
+
+    /// Effective moisture: precipitation minus potential evapotranspiration (which
+    /// scales with temperature). Maps to [0, 1] where 0 = maximally arid and 1 =
+    /// maximally humid. Used for biome classification and region detection.
+    fn generate_aridity(temperature: &HeatMap, precipitation: &HeatMap) -> HeatMap {
+        const ET_FACTOR: f64 = 0.35;
+        let data = temperature.data.iter().zip(precipitation.data.iter())
+            .map(|(&t, &p)| ((p - t * ET_FACTOR + ET_FACTOR) / (1.0 + ET_FACTOR)).clamp(0.0, 1.0))
+            .collect();
+        HeatMap { width: temperature.width, height: temperature.height, data }
     }
 
     /// Sample by nearest-neighbor. x and y are in [0, 1).
@@ -635,6 +656,18 @@ fn westerly_weight(abs_lat: f64) -> f64 {
         }
     }
     stops.last().unwrap().1
+}
+
+/// Land cells whose temperature falls below this threshold are classified as
+/// glaciated. Captures polar ice sheets and high-altitude snowfields.
+/// Tune upward for more glaciation, downward for less.
+const GLACIER_TEMP_THRESHOLD: f64 = 0.20;
+
+/// Returns a bool mask: true where a land cell is glaciated.
+fn generate_glacier(temperature: &HeatMap, is_ocean: &[bool]) -> Vec<bool> {
+    (0..temperature.data.len())
+        .map(|i| !is_ocean[i] && temperature.data[i] < GLACIER_TEMP_THRESHOLD)
+        .collect()
 }
 
 // ── Color functions ──────────────────────────────────────────────────────────
@@ -736,6 +769,35 @@ fn precipitation_color(t: f64) -> [u8; 3] {
             ([40, 130, 60], 0.60),   // wet
             ([20, 90, 130], 0.80),   // very wet
             ([10, 50, 180], 1.00),   // monsoon / extremely wet
+        ],
+    )
+}
+
+/// Glacier/ice color: pure white at coldest, pale blue at the warmer threshold edge.
+/// t is the normalized temperature within the glaciated range [0, GLACIER_TEMP_THRESHOLD].
+fn glacier_color(t: f64) -> [u8; 3] {
+    let normalized = (t / GLACIER_TEMP_THRESHOLD).clamp(0.0, 1.0);
+    sample_gradient(
+        normalized,
+        &[
+            ([250, 253, 255], 0.00), // pure cold white
+            ([200, 228, 248], 0.60), // pale ice blue
+            ([175, 212, 240], 1.00), // warmer glacier edge
+        ],
+    )
+}
+
+/// Effective moisture gradient: orange-tan (arid) → pale green → teal (humid).
+fn aridity_color(t: f64) -> [u8; 3] {
+    sample_gradient(
+        t,
+        &[
+            ([210, 150, 80],  0.00), // hyperarid
+            ([220, 200, 130], 0.20), // arid
+            ([190, 210, 150], 0.40), // semi-arid
+            ([100, 175, 130], 0.60), // moderate
+            ([50, 140, 120],  0.80), // humid
+            ([20, 90, 110],   1.00), // very humid
         ],
     )
 }
@@ -905,7 +967,9 @@ fn main() {
 
     println!("Generating climate...");
     let temperature = HeatMap::generate_temperature(&elevation);
-    let precipitation = HeatMap::generate_precipitation(&elevation, &is_ocean);
+    let precipitation = HeatMap::generate_precipitation(&elevation, &is_ocean, &temperature);
+    let is_glacier = generate_glacier(&temperature, &is_ocean);
+    let aridity = HeatMap::generate_aridity(&temperature, &precipitation);
 
     let temp_img = ImageBuffer::from_fn(width as u32, height as u32, |x, y| {
         let nx = x as f64 / width as f64;
@@ -923,8 +987,29 @@ fn main() {
     precip_img.save("precipitation.png").expect("failed to save precipitation.png");
     println!("Saved precipitation.png");
 
+    let aridity_img = ImageBuffer::from_fn(width as u32, height as u32, |x, y| {
+        let nx = x as f64 / width as f64;
+        let ny = y as f64 / height as f64;
+        Rgb(aridity_color(aridity.sample(nx, ny)))
+    });
+    aridity_img.save("aridity.png").expect("failed to save aridity.png");
+    println!("Saved aridity.png");
+
+    let glacier_img = ImageBuffer::from_fn(width as u32, height as u32, |x, y| {
+        let idx = y as usize * width + x as usize;
+        let nx = x as f64 / width as f64;
+        let ny = y as f64 / height as f64;
+        if is_glacier[idx] {
+            Rgb(glacier_color(temperature.sample(nx, ny)))
+        } else {
+            Rgb([0u8, 0, 0])
+        }
+    });
+    glacier_img.save("glacier.png").expect("failed to save glacier.png");
+    println!("Saved glacier.png");
+
     println!("Generating hydrology...");
-    let result = HeatMap::generate_hydrology(&elevation, &is_ocean, &precipitation, &params);
+    let result = HeatMap::generate_hydrology(&elevation, &is_ocean, &precipitation, &is_glacier, &params);
     println!(
         "  {} aquifer recharge zones identified",
         result.aquifer_zones.len()
@@ -981,9 +1066,14 @@ fn main() {
             if off_y == 2 && neighbor(dx as i64, dy as i64 + 1) <= 0.0 { coverage = EDGE_COVERAGE; }
             BAYER_4X4[ry as usize % 4][rx as usize % 4] < coverage
         };
+        let data_idx = (ry as usize / RENDER_SCALE) * width + (rx as usize / RENDER_SCALE);
         let mut color = if is_water {
             let d = bayer_dither(hydro_nearest, rx as usize, ry as usize, N_DITHER_LEVELS).max(0.01);
             water_color(d)
+        } else if is_glacier[data_idx] {
+            let t = temperature.sample(nx, ny);
+            let d = bayer_dither(t / GLACIER_TEMP_THRESHOLD, rx as usize, ry as usize, N_DITHER_LEVELS);
+            glacier_color(d)
         } else {
             let t = elevation.sample(nx, ny);
             let land_t = ((t - params.sea_level) / (1.0 - params.sea_level)).clamp(0.0, 1.0);
