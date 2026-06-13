@@ -2,6 +2,8 @@ use serde::{Serialize, Deserialize};
 use uuid::Uuid;
 use std::collections::HashMap;
 
+use crate::dom_cult_reg::{DomainTag, ReligionTag, VirtueTag};
+
 #[derive(Debug, Serialize, Deserialize)]
 pub enum DivineRole {
     Proxius,
@@ -45,8 +47,9 @@ pub struct BandAffiliation {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MortalIdentity {
-//  pub beliefs: HashMap<Belief, f32>,  // Belief and Culture enums to be shared
-//  pub culture: HashMap<Culture, f32>, // by all entities (Civs, Pops, etc.)
+    pub beliefs: HashMap<DomainTag, f32>,
+    pub religion: HashMap<ReligionTag, f32>,
+    pub culture: HashMap<CultureTag, f32>,
 //  pub personality: HashMap<Personality, f32>,
 //  pub gender: MortalGender,
 }
@@ -106,11 +109,12 @@ pub struct Mortal {
     pub milieu_pop_id: Uuid,
     pub faction_affs: Option<Vec<FactionAffiliation>>,
     pub band_aff: Option<BandAffiliation>,
+    pub identity: MortalIdentity,
     pub div_spark: DivineSpark,
     pub identity: MortalIdentity,
 //  pub occupation: Occupation, // This will probably come from an Enum and default to orig_pop's occupation.
 //  pub status: String,                 // Merge in a struct with title or something else?
-    pub skills: HashMap<Skill, f64>,
+    pub skills: HashMap<Skill, f32>,
 //  pub agent: MortalAgent,             // This will be defined in agent defs.
 //  pub visibility: EntityVisibility,   // This will be defined for entities generally.
     pub pinned: bool,

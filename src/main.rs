@@ -4,6 +4,7 @@ mod common;
 mod data;
 mod universe;
 mod bio;
+mod dom_cult_reg;
 // mod mortal;
 
 

@@ -2,32 +2,19 @@ use serde::{Serialize, Deserialize};
 use uuid::Uuid;
 use std::collections::HashMap;
 
+use crate::dom_cult_reg::DomainTag;
+
 #[derive(Debug, Serialize, Deserialize, Hash, Eq, PartialEq)]
-pub enum Domain {
-    Truth,
-    Order,
-    Silence,
-    Change,
-    Conflict,
-    Fire,
-    Water,
-    Void,
-    Growth,
-    Decay,
-    Memory,
-    Sacrifice,
-    Light,
-    Mastery,
-    Secrecy,
-    Community,
+pub enum FootprintKind {
+    DirectCreation,
+    OvertMiracles,
+    SubtleInfluence,
+    ProxiusActivity,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Footprint {
-    pub direct: f64,
-    pub overt: f64,
-    pub subtle: f64,
-    pub proxius: f64,
+    pub kind: HashMap<FootprintKind, f32>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -51,7 +38,7 @@ pub struct Universe {
     pub id: Uuid,
     pub name: String,
     pub age: EntityAge,
-    pub domain_exp: HashMap<Domain, f64>,
+    pub domain_exp: HashMap<DomainTag, f32>,
     pub footprint: Footprint,
 }
 
@@ -64,7 +51,7 @@ pub struct CosmicCoordinates {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GalacticCore {
-    pub domain_exp: HashMap<Domain, f64>,
+    pub domain_exp: HashMap<DomainTag, f32>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -76,7 +63,7 @@ pub struct Galaxy {
     pub parent_id: Uuid,
     pub child_ids: Option<Vec<Uuid>>,
     pub coord: CosmicCoordinates,
-    pub domain_exp: HashMap<Domain, f64>,
+    pub domain_exp: HashMap<DomainTag, f32>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -100,7 +87,7 @@ pub struct Star {
     pub kind: StarKind,
     pub parent_id: Option<Uuid>,        // System ID
     pub companion_ids: Option<Vec<Uuid>>, // Other Star IDs
-    pub domain_exp: HashMap<Domain, f64>,
+    pub domain_exp: HashMap<DomainTag, f32>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -112,7 +99,7 @@ pub struct System {
     pub parent_id: Option<Uuid>,
     pub child_ids: Option<Vec<Uuid>>,
     pub coord: CosmicCoordinates,
-    pub domain_exp: HashMap<Domain, f64>,
+    pub domain_exp: HashMap<DomainTag, f32>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -152,7 +139,7 @@ pub struct Planet {
     pub geo: Option<Vec<GeoTag>>,
     pub civ_ids: Option<Vec<Uuid>>,
     pub species_ids: Option<Vec<Uuid>>,
-    pub domain_exp: HashMap<Domain, f64>,
+    pub domain_exp: HashMap<DomainTag, f32>,
     pub footprint: Footprint,
 }
 
@@ -179,7 +166,7 @@ pub struct PopLocation {
     pub band_ids: Option<Vec<Uuid>>,
     pub pop_ids: Option<Vec<Uuid>>,
     pub mortal_ids: Option<Vec<Uuid>>,
-    pub domain_exp: HashMap<Domain, f64>,
+    pub domain_exp: HashMap<DomainTag, f32>,
     pub footprint: Footprint,
 }
 
