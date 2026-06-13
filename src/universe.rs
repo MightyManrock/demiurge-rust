@@ -44,9 +44,9 @@ pub struct Universe {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CosmicCoordinates {
-    pub x: f64,
-    pub y: f64,
-    pub z: f64,
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

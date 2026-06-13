@@ -49,7 +49,7 @@ pub struct BandAffiliation {
 pub struct MortalIdentity {
     pub beliefs: HashMap<DomainTag, f32>,
     pub religion: HashMap<ReligionTag, f32>,
-    pub culture: HashMap<CultureTag, f32>,
+    pub virtue: HashMap<VirtueTag, f32>,
 //  pub personality: HashMap<Personality, f32>,
 //  pub gender: MortalGender,
 }
@@ -106,12 +106,11 @@ pub struct Mortal {
     pub home_loc_id: Uuid,
     pub current_loc_id: Uuid,
     pub orig_pop_id: Uuid,
-    pub milieu_pop_id: Uuid,
+    pub milieu_pop_id: Option<Uuid>,
     pub faction_affs: Option<Vec<FactionAffiliation>>,
     pub band_aff: Option<BandAffiliation>,
     pub identity: MortalIdentity,
     pub div_spark: DivineSpark,
-    pub identity: MortalIdentity,
 //  pub occupation: Occupation, // This will probably come from an Enum and default to orig_pop's occupation.
 //  pub status: String,                 // Merge in a struct with title or something else?
     pub skills: HashMap<Skill, f32>,
