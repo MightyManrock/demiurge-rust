@@ -1162,6 +1162,69 @@ fn detect_regions(
     (region_map, regions)
 }
 
+// ── Political map helpers ─────────────────────────────────────────────────────
+
+fn hsv_to_rgb(h: f64, s: f64, v: f64) -> [u8; 3] {
+    let h6 = h * 6.0;
+    let i  = h6.floor() as u32;
+    let f  = h6 - h6.floor();
+    let p  = v * (1.0 - s);
+    let q  = v * (1.0 - s * f);
+    let t  = v * (1.0 - s * (1.0 - f));
+    let (r, g, b) = match i % 6 {
+        0 => (v, t, p), 1 => (q, v, p), 2 => (p, v, t),
+        3 => (p, q, v), 4 => (t, p, v), _ => (v, p, q),
+    };
+    [(r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8]
+}
+
+/// Golden-ratio hue spacing with 4-tier S/V interleaving so that adjacent
+/// region IDs differ in both hue and brightness.
+fn political_color(region_id: u32) -> [u8; 3] {
+    let hue = (region_id as f64 * 0.618_033_988_749_895) % 1.0;
+    let (s, v) = match region_id % 4 {
+        0 => (0.70, 0.88),
+        1 => (0.88, 0.65),
+        2 => (0.50, 0.93),
+        _ => (0.82, 0.75),
+    };
+    hsv_to_rgb(hue, s, v)
+}
+
+/// Renders ASCII text onto an image using the 8×8 bitmap font at the given
+/// pixel scale. Draws a 1-pixel black shadow first for legibility on any
+/// background.
+fn draw_text(
+    img:   &mut ImageBuffer<Rgb<u8>, Vec<u8>>,
+    x0:    i32,
+    y0:    i32,
+    text:  &str,
+    color: [u8; 3],
+    scale: i32,
+) {
+    use font8x8::UnicodeFonts;
+    let iw = img.width()  as i32;
+    let ih = img.height() as i32;
+    for (ci, ch) in text.chars().enumerate() {
+        let Some(glyph) = font8x8::BASIC_FONTS.get(ch) else { continue };
+        let cx = x0 + ci as i32 * 8 * scale;
+        for (row, &bits) in glyph.iter().enumerate() {
+            for col in 0..8i32 {
+                if bits & (1 << col) == 0 { continue; }
+                for sy in 0..scale {
+                    for sx in 0..scale {
+                        let px = cx + col * scale + sx;
+                        let py = y0 + row as i32 * scale + sy;
+                        if px >= 0 && py >= 0 && px < iw && py < ih {
+                            img.put_pixel(px as u32, py as u32, Rgb(color));
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 fn main() {
@@ -1446,4 +1509,67 @@ fn main() {
     });
     region_composite.save("regions.png").expect("failed to save regions.png");
     println!("Saved regions.png");
+
+    // Political map: semi-transparent region colors blended onto the composite,
+    // with darkened land-region borders and numeric ID labels at centroids.
+    println!("Rendering political map at {}x{}...", render_width, render_height);
+
+    // Compute each region's centroid in data-pixel space from the region map.
+    let max_rid = regions.iter().map(|r| r.id as usize).max().unwrap_or(0) + 1;
+    let mut cent_x = vec![0u64; max_rid];
+    let mut cent_y = vec![0u64; max_rid];
+    let mut cent_n = vec![0u64; max_rid];
+    for (idx, &rid) in region_map.iter().enumerate() {
+        cent_x[rid as usize] += (idx % width) as u64;
+        cent_y[rid as usize] += (idx / width) as u64;
+        cent_n[rid as usize] += 1;
+    }
+
+    const ALPHA: f64 = 0.42;
+    let mut political = ImageBuffer::from_fn(render_width as u32, render_height as u32, |rx, ry| {
+        let dx = rx as usize / RENDER_SCALE;
+        let dy = ry as usize / RENDER_SCALE;
+        let data_idx = dy * width + dx;
+        let base = composite.get_pixel(rx, ry);
+
+        if is_ocean[data_idx] || is_glacier[data_idx] {
+            return *base;
+        }
+
+        let cur = region_map[data_idx];
+        let [or_, og, ob] = political_color(cur);
+
+        let is_border = [(-1i64, 0i64), (1, 0), (0, -1), (0, 1)].iter().any(|&(ddx, ddy)| {
+            let ndx = (dx as i64 + ddx).rem_euclid(width as i64) as usize;
+            let ndy = (dy as i64 + ddy).clamp(0, height as i64 - 1) as usize;
+            let nidx = ndy * width + ndx;
+            !is_ocean[nidx] && !is_glacier[nidx] && region_map[nidx] != cur
+        });
+
+        if is_border {
+            Rgb([base[0] / 3, base[1] / 3, base[2] / 3])
+        } else {
+            let b = |base_c: u8, over_c: u8| -> u8 {
+                (base_c as f64 * (1.0 - ALPHA) + over_c as f64 * ALPHA).round() as u8
+            };
+            Rgb([b(base[0], or_), b(base[1], og), b(base[2], ob)])
+        }
+    });
+
+    // Draw region ID labels centered on each region's centroid.
+    const TEXT_SCALE: i32 = 2;
+    for r in &regions {
+        let rid = r.id as usize;
+        if cent_n[rid] == 0 { continue; }
+        let cx = (cent_x[rid] / cent_n[rid]) as usize * RENDER_SCALE + RENDER_SCALE / 2;
+        let cy = (cent_y[rid] / cent_n[rid]) as usize * RENDER_SCALE + RENDER_SCALE / 2;
+        let label = format!("{}", r.id);
+        let lx = cx as i32 - label.len() as i32 * 8 * TEXT_SCALE / 2;
+        let ly = cy as i32 - 4 * TEXT_SCALE;
+        draw_text(&mut political, lx + 1, ly + 1, &label, [0, 0, 0], TEXT_SCALE);
+        draw_text(&mut political, lx,     ly,     &label, [255, 255, 255], TEXT_SCALE);
+    }
+
+    political.save("political.png").expect("failed to save political.png");
+    println!("Saved political.png");
 }

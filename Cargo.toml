@@ -11,4 +11,5 @@ slotmap = "1.1.1"
 uuid = { version = "1", features = ["v4", "serde"] }
 noise = "0.9.0"
 image = "0.25.10"
+font8x8 = "0.3"
 
