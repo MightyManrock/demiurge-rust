@@ -102,18 +102,19 @@ pub struct System {
     pub domain_exp: HashMap<DomainTag, f32>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Hash, Eq, PartialEq)]
 pub enum AtmosphereTag {
     Oxygen,
     Nitrogen,
     CarbonMonoxide,
     CarbonDioxide,
     Methane,
-    Fumarate,
-    Sulfate,
+    SulfurDioxide,
+    WaterVapor,
+    Ammonia,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Hash, Eq, PartialEq)]
 pub enum LiquidTag {
     Water,
     Ammonia,
@@ -123,21 +124,18 @@ pub enum LiquidTag {
     SiliconDioxide,
     SulfuricAcid,
     Formamide,
+    Ethane,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Hash, Eq, PartialEq)]
 pub enum GeoTag {
-      Oceanic,
-      Arid,
-      Glacial,
-      Rocky,                                                                                                                   
-      Crystalline,
-      Cavernous,
-      Dune,
-      Verdant,
-      Ash,
-}
-
+    Silicate,                                                                                                                                                                              
+    Carbonate,
+    Basaltic,
+    Ferrous,
+    Icy,
+    Crystalline,
+  }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Planet {
@@ -147,8 +145,13 @@ pub struct Planet {
     pub parent_id: Option<Uuid>,
     pub child_ids: Option<Vec<Uuid>>,
     pub coord: CosmicCoordinates,
-    pub atmo: Option<Vec<AtmosphereTag>>,
-    pub geo: Option<Vec<GeoTag>>,
+    pub gravity: f32,
+    pub axial_tilt: f32,
+    pub atmo: HashMap<AtmosphereTag, f32>,
+    pub geo: HashMap<GeoTag, f32>,
+    pub volcanism: f32,
+    pub hydro: HashMap<LiquidTag, f32>,
+    pub liquid_coverage: f32,
     pub civ_ids: Option<Vec<Uuid>>,
     pub species_ids: Option<Vec<Uuid>>,
     pub domain_exp: HashMap<DomainTag, f32>,
