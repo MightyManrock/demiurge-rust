@@ -2,6 +2,12 @@ use demiurge_rust::universe::{
     AtmosphereTag, CosmicCoordinates, EntityAge, Footprint, GeoTag, LiquidTag, Planet, Star,
     StarKind,
 };
+use demiurge_rust::bio::{
+    AtmosphereAffinity, AtmosphereRelationship, FoodTag, LifeBasis,
+    ReproductionKind, ReproductionProfile, ReproductiveMethod, ReproductiveRole,
+    RespirationMedium, SexKind, Solvent, Species, SpeciesKind, SpeciesSentience,
+};
+use demiurge_rust::common::Range;
 use uuid::Uuid;
 use image::{ImageBuffer, Rgb};
 use noise::{Fbm, NoiseFn, Perlin};
@@ -36,6 +42,10 @@ struct PlanetParams {
     glacier_temp_threshold: f64, // temp below which land glaciates
     sea_ice_temp_threshold: f64, // temp below which ocean freezes
     sea_ice_evap_factor:    f64, // ocean evaporation reduction under sea ice
+    // Atmosphere
+    gravity:                f64, // surface gravity in Earth g; used for pressure-at-elevation
+    base_press:             f64, // sea-level atmospheric pressure in kPa
+    atmo:                   HashMap<AtmosphereTag, f32>, // atmospheric composition fractions
     // Hydrology
     sea_level:              f64, // from liquid_coverage
     max_lake_fill:          f64,
@@ -72,6 +82,14 @@ impl PlanetParams {
             glacier_temp_threshold: 0.20,
             sea_ice_temp_threshold: 0.14,
             sea_ice_evap_factor:    0.25,
+            gravity:                1.0,
+            base_press:             101.325,
+            atmo:                   HashMap::from([
+                (AtmosphereTag::Nitrogen,      0.78),
+                (AtmosphereTag::Oxygen,        0.21),
+                (AtmosphereTag::CarbonDioxide, 0.0004),
+                (AtmosphereTag::WaterVapor,    0.01),
+            ]),
             sea_level:              0.5,
             max_lake_fill:          0.04,
             aquifer_probability:    0.35,
@@ -152,6 +170,9 @@ impl PlanetParams {
             glacier_temp_threshold,
             sea_ice_temp_threshold,
             sea_ice_evap_factor:    0.25,
+            gravity:                planet.gravity as f64,
+            base_press:             planet.base_press as f64,
+            atmo:                   planet.atmo.clone(),
             sea_level:              planet.liquid_coverage as f64,
             max_lake_fill:          0.04,
             aquifer_probability,
@@ -1527,6 +1548,103 @@ fn draw_text(
     }
 }
 
+// ── Suitability scoring ───────────────────────────────────────────────────────
+
+fn normalized_temp_to_celsius(t: f64) -> f64 {
+    t * 70.0 - 15.0
+}
+
+/// Scores how well `value` fits within `range`: 1.0 inside, linear decay outside,
+/// reaching 0 at a distance of one range-width beyond either boundary.
+fn range_score(value: f64, range: &Range<f32>) -> f64 {
+    let lo = range.min as f64;
+    let hi = range.max as f64;
+    if value >= lo && value <= hi {
+        return 1.0;
+    }
+    let span = (hi - lo).max(1e-6);
+    let dist = if value < lo { lo - value } else { value - hi };
+    (1.0 - dist / span).max(0.0)
+}
+
+/// Planet-level atmosphere viability multiplier in [0, 1].
+/// Only evaluates Gas-medium entries; Liquid/Solid/Vacuum entries are environmental
+/// conditions checked separately.
+fn atmo_score(atmo_aff: &[AtmosphereAffinity], planet_atmo: &HashMap<AtmosphereTag, f32>) -> f64 {
+    let mut score = 1.0_f64;
+    for aff in atmo_aff {
+        if aff.medium != RespirationMedium::Gas { continue; }
+        let actual = aff.tag
+            .as_ref()
+            .and_then(|t| planet_atmo.get(t))
+            .copied()
+            .unwrap_or(0.0) as f64;
+        let in_threshold = match &aff.threshold {
+            None => true,
+            Some(r) => actual >= r.min as f64 && actual <= r.max as f64,
+        };
+        match aff.relationship {
+            AtmosphereRelationship::Required => {
+                let s = match &aff.threshold {
+                    Some(r) => range_score(actual, r),
+                    None => if actual > 0.0 { 1.0 } else { 0.0 },
+                };
+                score *= s;
+            }
+            AtmosphereRelationship::Fatal if in_threshold => { score = 0.0; }
+            AtmosphereRelationship::Toxic if in_threshold => { score *= 0.3; }
+            _ => {}
+        }
+    }
+    score
+}
+
+fn score_region_for_species(species: &Species, region: &Region, params: &PlanetParams) -> f64 {
+    // Planet-level atmosphere gate (constant across all regions).
+    let atmo = atmo_score(&species.atmo_aff, &params.atmo);
+    if atmo == 0.0 { return 0.0; }
+
+    // Gravity (planet-level).
+    let grav = match &species.grav_range {
+        Some(r) => range_score(params.gravity, r),
+        None => 1.0,
+    };
+
+    // Pressure derived from mean land elevation above sea level.
+    let land_elev = if region.ocean_frac > 0.9 {
+        0.0
+    } else {
+        ((region.mean_elev - params.sea_level) / (1.0 - params.sea_level)).clamp(0.0, 1.0)
+    };
+    let pressure = params.base_press * (-land_elev * 0.8 * params.gravity).exp();
+    let press = match &species.press_range {
+        Some(r) => range_score(pressure, r),
+        None => 1.0,
+    };
+
+    // Temperature converted to Celsius.
+    let temp_c = normalized_temp_to_celsius(region.mean_temp);
+    let temp = match &species.temp_range {
+        Some(r) => range_score(temp_c, r),
+        None => 1.0,
+    };
+
+    // Humidity (ambient moisture proxy).
+    let humidity = match &species.solvent.humidity_range {
+        Some(r) => range_score(region.mean_precip, r),
+        None => 1.0,
+    };
+
+    // Solvent access: effective water availability; 0 for deep ocean.
+    let solvent_val = if region.ocean_frac > 0.9 { 0.0 } else { 1.0 - region.mean_aridity };
+    let solvent = match &species.solvent.access_range {
+        Some(r) => range_score(solvent_val, r),
+        None => 1.0,
+    };
+
+    atmo * grav * press * temp * humidity * solvent
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 fn main() {
@@ -1919,26 +2037,82 @@ fn main() {
         params.lon_weight,
     );
 
+    let keth = Species {
+        id: Uuid::parse_str("2433c35f-6a41-4529-af95-92d9c1f1c4dc").unwrap(),
+        name: Some("Keth".into()),
+        kind: SpeciesKind::Named,
+        origin_world_id: Uuid::parse_str("e3f92fd2-3501-40b4-957f-95d65dc4b51e").unwrap(),
+        sentience: Some(SpeciesSentience::Sapient),
+        basis: LifeBasis::Carbon,
+        solvent: Solvent {
+            liquid: LiquidTag::Water,
+            access_range: Some(Range { min: 0.65, max: 0.95 }),  // 1-aridity on Oros ≈ 0.75-0.82
+            humidity_range: Some(Range { min: 0.05, max: 0.70 }),
+        },
+        atmo_aff: vec![
+            AtmosphereAffinity {
+                tag: Some(AtmosphereTag::Oxygen),
+                threshold: Some(Range { min: 0.11, max: 0.18 }),
+                relationship: AtmosphereRelationship::Required,
+                medium: RespirationMedium::Gas,
+            },
+            AtmosphereAffinity {
+                tag: Some(AtmosphereTag::CarbonDioxide),
+                threshold: Some(Range { min: 0.0, max: 0.03 }),
+                relationship: AtmosphereRelationship::Tolerated,
+                medium: RespirationMedium::Gas,
+            },
+            AtmosphereAffinity {
+                tag: Some(AtmosphereTag::CarbonMonoxide),
+                threshold: Some(Range { min: 0.002, max: 1.0 }),
+                relationship: AtmosphereRelationship::Fatal,
+                medium: RespirationMedium::Gas,
+            },
+            AtmosphereAffinity { tag: None, threshold: None, relationship: AtmosphereRelationship::Fatal, medium: RespirationMedium::Liquid },
+            AtmosphereAffinity { tag: None, threshold: None, relationship: AtmosphereRelationship::Fatal, medium: RespirationMedium::Solid },
+            AtmosphereAffinity { tag: None, threshold: None, relationship: AtmosphereRelationship::Fatal, medium: RespirationMedium::Vacuum },
+        ],
+        food_tag: vec![FoodTag::Carnivorous],
+        repro_profile: ReproductionProfile {
+            sex_kinds: vec![
+                SexKind { name: "Male".into(),   symbol: None, reproductive_role: Some(vec![ReproductiveRole::Contributor]) },
+                SexKind { name: "Female".into(), symbol: None, reproductive_role: Some(vec![ReproductiveRole::Receiver]) },
+            ],
+            repro_kind: vec![ReproductionKind::Sexual],
+            repro_method: Some(ReproductiveMethod::Viviparity),
+        },
+        lifespan: Some(Range { min: 200, max: 280 }),
+        temp_range: Some(Range { min: 22.0, max: 30.0 }),
+        press_range: Some(Range { min: 55.0, max: 105.0 }),
+        grav_range: Some(Range { min: 0.50, max: 1.10 }),
+    };
+
+    let species_list: &[(&str, &Species)] = &[("Keth", &keth)];
+
     let total_cells = (width * height) as f64;
-    println!();
-    println!("=== {} regions detected ===", regions.len());
-    println!();
-    println!("{:>4}  {:>7}  {:>6}  {:>5}  {:>5}  {:>6}  {:>5}  {}",
-        "ID", "Cells", "%", "Elev", "Temp", "Precip", "Arid", "Character");
-    println!("{}", "─".repeat(68));
-    for r in &regions {
-        println!("{:>4}  {:>7}  {:>5.1}%  {:>5.2}  {:>5.2}  {:>6.2}  {:>5.2}  {}",
-            r.id,
-            r.size,
-            r.size as f64 / total_cells * 100.0,
-            r.mean_elev,
-            r.mean_temp,
-            r.mean_precip,
-            r.mean_aridity,
-            r.character(),
-        );
+    for (sp_name, species) in species_list {
+        println!();
+        println!("=== {} regions — suitability for {} ===", regions.len(), sp_name);
+        println!();
+        println!("{:>4}  {:>7}  {:>6}  {:>5}  {:>5}  {:>6}  {:>5}  {:>5}  {}",
+            "ID", "Cells", "%", "Elev", "Temp", "Precip", "Arid", "Suit%", "Character");
+        println!("{}", "─".repeat(75));
+        for r in &regions {
+            let suit = score_region_for_species(species, r, &params);
+            println!("{:>4}  {:>7}  {:>5.1}%  {:>5.2}  {:>5.2}  {:>6.2}  {:>5.2}  {:>4.0}%  {}",
+                r.id,
+                r.size,
+                r.size as f64 / total_cells * 100.0,
+                r.mean_elev,
+                r.mean_temp,
+                r.mean_precip,
+                r.mean_aridity,
+                suit * 100.0,
+                r.character(),
+            );
+        }
+        println!("{}", "─".repeat(75));
     }
-    println!("{}", "─".repeat(68));
     println!();
 
     // Region composite: base composite with red outlines at region boundaries.

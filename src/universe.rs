@@ -103,7 +103,7 @@ pub struct System {
     pub domain_exp: HashMap<DomainTag, f32>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Hash, Eq, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Hash, Eq, PartialEq)]
 pub enum AtmosphereTag {
     Oxygen,
     Nitrogen,

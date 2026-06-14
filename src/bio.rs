@@ -27,7 +27,7 @@ pub enum LifeBasis {
     Phosphorus,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum AtmosphereRelationship {
     Required,
     Beneficial,
@@ -36,7 +36,7 @@ pub enum AtmosphereRelationship {
     Fatal,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum RespirationMedium {
     Gas,
     Liquid,
