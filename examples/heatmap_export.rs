@@ -1190,6 +1190,10 @@ fn detect_regions(
         let st = temperature.data[start];
         let sp = precipitation.data[start];
         let sx = start % width;
+        let sy = start / width;
+        // cos(latitude) — 1.0 at equator, 0.0 at poles. Scales lon_weight down
+        // toward the poles where east-west cells are physically closer together.
+        let lat_cos = (std::f64::consts::PI * (sy as f64 / height as f64 - 0.5)).cos();
 
         while let Some(idx) = queue.pop_front() {
             cells.push(idx);
@@ -1205,7 +1209,7 @@ fn detect_regions(
                 // Wrap-aware longitude distance from seed, normalised to [0, 0.5].
                 let raw_dx = (sx as i64 - nx as i64).unsigned_abs() as usize;
                 let ddx = raw_dx.min(width - raw_dx) as f64 / width as f64;
-                let dl  = lon_weight * ddx;
+                let dl  = lon_weight * lat_cos * ddx;
                 if (de * de + dt * dt + dp * dp + dl * dl).sqrt() <= thr {
                     region_map[nidx] = id;
                     queue.push_back(nidx);
