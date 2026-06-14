@@ -1,4 +1,8 @@
-use demiurge_rust::universe::{AtmosphereTag, GeoTag, Planet, Star};
+use demiurge_rust::universe::{
+    AtmosphereTag, CosmicCoordinates, EntityAge, Footprint, GeoTag, LiquidTag, Planet, Star,
+    StarKind,
+};
+use uuid::Uuid;
 use image::{ImageBuffer, Rgb};
 use noise::{Fbm, NoiseFn, Perlin};
 use std::cmp::Reverse;
@@ -44,6 +48,7 @@ struct PlanetParams {
     region_min_size:        usize,
     island_coast_dist:      usize,
     island_arch_dist:       usize,
+    lon_weight:             f64,   // how much east-west spread from seed costs; 0 = no limit
 }
 
 impl PlanetParams {
@@ -75,6 +80,7 @@ impl PlanetParams {
             region_min_size:        150,
             island_coast_dist:      3,
             island_arch_dist:       25,
+            lon_weight:             0.5,
         }
     }
 
@@ -147,6 +153,7 @@ impl PlanetParams {
             region_min_size:        150,
             island_coast_dist:      3,
             island_arch_dist:       25,
+            lon_weight:             0.5,
         }
     }
 }
@@ -1155,6 +1162,7 @@ fn detect_regions(
     min_size:        usize,
     coast_dist:      usize,
     arch_dist:       usize,
+    lon_weight:      f64,
 ) -> (Vec<u32>, Vec<Region>) {
     let width  = elevation.width;
     let height = elevation.height;
@@ -1181,6 +1189,7 @@ fn detect_regions(
         let se = elevation.data[start];
         let st = temperature.data[start];
         let sp = precipitation.data[start];
+        let sx = start % width;
 
         while let Some(idx) = queue.pop_front() {
             cells.push(idx);
@@ -1190,10 +1199,14 @@ fn detect_regions(
                 let nidx = ny * width + nx;
                 if region_map[nidx] != u32::MAX { continue; }
                 if cell_kind(nidx, is_ocean, is_glacier, is_sea_ice) != kind { continue; }
-                let de = se - elevation.data[nidx];
-                let dt = st - temperature.data[nidx];
-                let dp = sp - precipitation.data[nidx];
-                if (de * de + dt * dt + dp * dp).sqrt() <= thr {
+                let de  = se - elevation.data[nidx];
+                let dt  = st - temperature.data[nidx];
+                let dp  = sp - precipitation.data[nidx];
+                // Wrap-aware longitude distance from seed, normalised to [0, 0.5].
+                let raw_dx = (sx as i64 - nx as i64).unsigned_abs() as usize;
+                let ddx = raw_dx.min(width - raw_dx) as f64 / width as f64;
+                let dl  = lon_weight * ddx;
+                if (de * de + dt * dt + dp * dp + dl * dl).sqrt() <= thr {
                     region_map[nidx] = id;
                     queue.push_back(nidx);
                 }
@@ -1475,18 +1488,71 @@ fn main() {
     let width = 1024usize;
     let height = 512usize;
 
-    // Placeholder — swap in the real planet UUID when generation is wired up.
-    let planet_uuid: [u8; 16] = [
-        0x6b, 0xa7, 0xb8, 0x10, 0x9d, 0xad, 0x11, 0xd1,
-        0x80, 0xb4, 0x00, 0xc0, 0x4f, 0xd4, 0x30, 0xc8,
-    ];
-    let seed = seed_from_uuid(planet_uuid);
+    // ── Oros ─────────────────────────────────────────────────────────────────
+    let null_age = EntityAge {
+        formation_billions: Some(3), formation_millions: None,
+        formation_thousands: None,  formation_years: 0,
+        formation_month: 0,         formation_day: 0,
+        age_billions: Some(3),      age_millions: None,
+        age_thousands: None,        age_years: None,
+        age_months: None,           age_days: 0,
+    };
+    let star = Star {
+        id:            Uuid::nil(),
+        name:          "Outer Reach Star".to_string(),
+        age:           EntityAge { formation_billions: Some(4), formation_millions: None,
+                                   formation_thousands: None, formation_years: 0,
+                                   formation_month: 0, formation_day: 0,
+                                   age_billions: Some(4), age_millions: None,
+                                   age_thousands: None, age_years: None,
+                                   age_months: None, age_days: 0 },
+        kind:          StarKind::YellowDwarf,
+        luminosity:    1.08,
+        parent_id:     None,
+        companion_ids: None,
+        domain_exp:    HashMap::new(),
+    };
+    let oros = Planet {
+        id:             Uuid::parse_str("e3f92fd2-3501-40b4-957f-95d65dc4b51e").unwrap(),
+        name:           "Oros".to_string(),
+        age:            null_age,
+        parent_id:      None,
+        child_ids:      None,
+        coord:          CosmicCoordinates { x: 1.3, y: 0.0, z: 0.0 },
+        radius:         0.88,
+        gravity:        0.83,
+        axial_tilt:     22.0,
+        atmo:           HashMap::from([
+            (AtmosphereTag::WaterVapor,    0.08),
+            (AtmosphereTag::Nitrogen,      0.76),
+            (AtmosphereTag::Oxygen,        0.15),
+            (AtmosphereTag::CarbonDioxide, 0.01),
+        ]),
+        geo:            HashMap::from([
+            (GeoTag::Silicate,    0.48),
+            (GeoTag::Basaltic,    0.20),
+            (GeoTag::Ferrous,     0.14),
+            (GeoTag::Carbonate,   0.08),
+            (GeoTag::Crystalline, 0.10),
+        ]),
+        volcanism:      0.20,
+        hydro:          HashMap::from([(LiquidTag::Water, 1.0)]),
+        liquid_coverage: 0.33,
+        civ_ids:        None,
+        species_ids:    None,
+        domain_exp:     HashMap::new(),
+        footprint:      Footprint { kind: HashMap::new() },
+    };
+    let params = PlanetParams::from_planet(&oros, &star);
+    let seed = params.seed;
+
+    println!("Planet: {} | temp_baseline={:.2} temp_gradient={:.2} precip_moisture={:.3} sea_level={:.2}",
+        oros.name, params.temp_baseline, params.temp_gradient, params.precip_moisture, params.sea_level);
+
     const RENDER_SCALE: usize = 3;
     const N_DITHER_LEVELS: usize = 16;
     let render_width = width * RENDER_SCALE;
     let render_height = height * RENDER_SCALE;
-
-    let params = PlanetParams::earth_like(seed);
 
     println!("Generating {}x{} elevation map (seed {})...", width, height, seed);
     let mut elevation = HeatMap::generate_elevation(width, height, seed, params.warp_strength);
@@ -1713,6 +1779,7 @@ fn main() {
         &is_ocean, &is_glacier, &is_sea_ice,
         params.land_threshold, params.ocean_threshold, params.region_min_size,
         params.island_coast_dist, params.island_arch_dist,
+        params.lon_weight,
     );
 
     let total_cells = (width * height) as f64;
