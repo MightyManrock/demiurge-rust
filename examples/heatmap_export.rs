@@ -80,7 +80,7 @@ impl PlanetParams {
             region_min_size:        150,
             island_coast_dist:      3,
             island_arch_dist:       25,
-            lon_weight:             0.5,
+            lon_weight:             0.75,
         }
     }
 
@@ -153,7 +153,7 @@ impl PlanetParams {
             region_min_size:        150,
             island_coast_dist:      3,
             island_arch_dist:       25,
-            lon_weight:             0.5,
+            lon_weight:             0.75,
         }
     }
 }
