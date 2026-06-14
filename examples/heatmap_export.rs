@@ -1107,10 +1107,17 @@ struct Region {
 }
 
 impl Region {
+    fn temp_zone(&self) -> &'static str {
+        if self.mean_temp < 0.20 { "Polar" }
+        else if self.mean_temp < 0.35 { "Cold" }
+        else if self.mean_temp < 0.55 { "Temperate" }
+        else if self.mean_temp < 0.70 { "Hot" }
+        else { "Tropical" }
+    }
+
     fn climate_character(&self) -> &'static str {
         if self.sea_ice_frac > 0.5   { return "Sea Ice"; }
         if self.glacier_frac > 0.5   { return "Glacier / Ice Sheet"; }
-        if self.salt_flat_frac > 0.5 { return "Salt Flats"; }
         if self.ocean_frac > 0.5 {
             if self.mean_temp < 0.20 { return "Polar Ocean"; }
             if self.mean_temp < 0.50 { return "Cold Ocean"; }
@@ -1143,12 +1150,15 @@ impl Region {
     }
 
     fn character(&self) -> String {
-        let base = self.climate_character();
-        match self.island_components {
-            0 => base.to_string(),
-            1 => format!("{base} Island"),
-            _ => format!("{base} Archipelago"),
+        let suffix = match self.island_components {
+            0 => "",
+            1 => " Island",
+            _ => " Archipelago",
+        };
+        if self.salt_flat_frac > 0.5 {
+            return format!("{} Salt Flats{suffix}", self.temp_zone());
         }
+        format!("{}{suffix}", self.climate_character())
     }
 }
 
@@ -1689,6 +1699,40 @@ fn main() {
     let n_salt_flat = is_salt_flat.iter().filter(|&&b| b).count();
     println!("  {} salt flat cells (aridity_thr={:.3})", n_salt_flat, salt_flat_aridity_threshold);
 
+    // Distance-from-edge for each salt flat cell (in data pixels).
+    // Used to dither surrounding terrain into the flat's interior — cells at the
+    // edge show pure terrain; coverage ramps to 100% salt flat over DITHER_DIST pixels.
+    const SALT_FLAT_DITHER_DIST: u32 = 14;
+    let mut salt_flat_dist: Vec<u32> = vec![SALT_FLAT_DITHER_DIST; width * height];
+    {
+        let mut queue: VecDeque<usize> = VecDeque::new();
+        for i in 0..width * height {
+            if !is_salt_flat[i] { continue; }
+            let x = i % width;
+            let y = i / width;
+            let near_outside = neighbors_4(x, y, width, height)
+                .iter()
+                .any(|&(nx, ny)| !is_salt_flat[ny * width + nx]);
+            if near_outside {
+                salt_flat_dist[i] = 0;
+                queue.push_back(i);
+            }
+        }
+        while let Some(idx) = queue.pop_front() {
+            let x = idx % width;
+            let y = idx / width;
+            for (nx, ny) in neighbors_4(x, y, width, height) {
+                let nidx = ny * width + nx;
+                if !is_salt_flat[nidx] { continue; }
+                let nd = salt_flat_dist[idx] + 1;
+                if nd < salt_flat_dist[nidx] {
+                    salt_flat_dist[nidx] = nd;
+                    queue.push_back(nidx);
+                }
+            }
+        }
+    }
+
     // Raw hydrology: black for dry land, water gradient for wet cells.
     let hydro_img = ImageBuffer::from_fn(width as u32, height as u32, |x, y| {
         let nx = x as f64 / width as f64;
@@ -1794,9 +1838,20 @@ fn main() {
                 terrain_color(d)
             }
         } else if is_salt_flat[data_idx] {
-            let arid = aridity.sample(nx, ny);
-            let d = bayer_dither(arid, rx as usize, ry as usize, N_DITHER_LEVELS);
-            salt_flat_color(d)
+            // Coverage ramps from 0 at the edge to 1 at SALT_FLAT_DITHER_DIST pixels in.
+            // Below-coverage pixels fall through to terrain so the surrounding ground
+            // bleeds into the flat's interior with a Bayer-ordered dissolve.
+            let coverage = salt_flat_dist[data_idx] as f64 / SALT_FLAT_DITHER_DIST as f64;
+            if BAYER_4X4[ry as usize % 4][rx as usize % 4] < coverage {
+                let arid = aridity.sample(nx, ny);
+                let d = bayer_dither(arid, rx as usize, ry as usize, N_DITHER_LEVELS);
+                salt_flat_color(d)
+            } else {
+                let t = elevation.sample(nx, ny);
+                let land_t = ((t - params.sea_level) / (1.0 - params.sea_level)).clamp(0.0, 1.0);
+                let d = bayer_dither(land_t, rx as usize, ry as usize, N_DITHER_LEVELS);
+                terrain_color(d)
+            }
         } else {
             let t = elevation.sample(nx, ny);
             let land_t = ((t - params.sea_level) / (1.0 - params.sea_level)).clamp(0.0, 1.0);
