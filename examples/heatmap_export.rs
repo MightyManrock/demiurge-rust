@@ -1520,6 +1520,7 @@ fn main() {
     let mut cent_y = vec![0u64; max_rid];
     let mut cent_n = vec![0u64; max_rid];
     for (idx, &rid) in region_map.iter().enumerate() {
+        if rid == u32::MAX { continue; }
         cent_x[rid as usize] += (idx % width) as u64;
         cent_y[rid as usize] += (idx / width) as u64;
         cent_n[rid as usize] += 1;
@@ -1532,11 +1533,10 @@ fn main() {
         let data_idx = dy * width + dx;
         let base = composite.get_pixel(rx, ry);
 
-        if is_ocean[data_idx] || is_glacier[data_idx] {
+        let cur = region_map[data_idx];
+        if is_ocean[data_idx] || is_glacier[data_idx] || cur == u32::MAX {
             return *base;
         }
-
-        let cur = region_map[data_idx];
         let [or_, og, ob] = political_color(cur);
 
         let is_border = [(-1i64, 0i64), (1, 0), (0, -1), (0, 1)].iter().any(|&(ddx, ddy)| {
