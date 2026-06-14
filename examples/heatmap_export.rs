@@ -1825,15 +1825,20 @@ fn main() {
     println!("Rendering political map at {}x{}...", render_width, render_height);
 
     // Compute each region's centroid in data-pixel space from the region map.
+    // x uses a circular mean so dateline-spanning regions get a correct centre
+    // rather than averaging to the middle of the map.
     let max_rid = regions.iter().map(|r| r.id as usize).max().unwrap_or(0) + 1;
-    let mut cent_x = vec![0u64; max_rid];
-    let mut cent_y = vec![0u64; max_rid];
-    let mut cent_n = vec![0u64; max_rid];
+    let mut cent_sin = vec![0.0f64; max_rid];
+    let mut cent_cos = vec![0.0f64; max_rid];
+    let mut cent_y   = vec![0u64;   max_rid];
+    let mut cent_n   = vec![0u64;   max_rid];
     for (idx, &rid) in region_map.iter().enumerate() {
         if rid == u32::MAX { continue; }
-        cent_x[rid as usize] += (idx % width) as u64;
-        cent_y[rid as usize] += (idx / width) as u64;
-        cent_n[rid as usize] += 1;
+        let angle = std::f64::consts::TAU * (idx % width) as f64 / width as f64;
+        cent_sin[rid as usize] += angle.sin();
+        cent_cos[rid as usize] += angle.cos();
+        cent_y[rid as usize]   += (idx / width) as u64;
+        cent_n[rid as usize]   += 1;
     }
 
     const ALPHA: f64 = 0.42;
@@ -1871,10 +1876,16 @@ fn main() {
     for r in &regions {
         let rid = r.id as usize;
         if cent_n[rid] == 0 { continue; }
-        let cx = (cent_x[rid] / cent_n[rid]) as usize * RENDER_SCALE + RENDER_SCALE / 2;
+        // Circular mean for x resolves dateline-spanning regions correctly.
+        let n = cent_n[rid] as f64;
+        let mean_angle = (cent_sin[rid] / n).atan2(cent_cos[rid] / n);
+        let cx_data = (mean_angle / std::f64::consts::TAU * width as f64)
+            .rem_euclid(width as f64) as usize;
+        let cx = cx_data * RENDER_SCALE + RENDER_SCALE / 2;
         let cy = (cent_y[rid] / cent_n[rid]) as usize * RENDER_SCALE + RENDER_SCALE / 2;
         let label = format!("{}", r.id);
-        let lx = cx as i32 - label.len() as i32 * 8 * TEXT_SCALE / 2;
+        let label_w = label.len() as i32 * 8 * TEXT_SCALE;
+        let lx = (cx as i32 - label_w / 2).clamp(0, render_width as i32 - label_w);
         let ly = cy as i32 - 4 * TEXT_SCALE;
         draw_text(&mut political, lx + 1, ly + 1, &label, [0, 0, 0], TEXT_SCALE);
         draw_text(&mut political, lx,     ly,     &label, [255, 255, 255], TEXT_SCALE);
