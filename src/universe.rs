@@ -85,6 +85,7 @@ pub struct Star {
     pub name: String,
     pub age: EntityAge,
     pub kind: StarKind,
+    pub luminosity: f32,
     pub parent_id: Option<Uuid>,        // System ID
     pub companion_ids: Option<Vec<Uuid>>, // Other Star IDs
     pub domain_exp: HashMap<DomainTag, f32>,
@@ -129,13 +130,13 @@ pub enum LiquidTag {
 
 #[derive(Debug, Serialize, Deserialize, Hash, Eq, PartialEq)]
 pub enum GeoTag {
-    Silicate,                                                                                                                                                                              
+    Silicate,
     Carbonate,
     Basaltic,
     Ferrous,
     Icy,
     Crystalline,
-  }
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Planet {
