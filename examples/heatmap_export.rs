@@ -1533,66 +1533,83 @@ fn main() {
     let width = 1024usize;
     let height = 512usize;
 
-    // ── Oros ─────────────────────────────────────────────────────────────────
-    let null_age = EntityAge {
-        formation_billions: Some(3), formation_millions: None,
-        formation_thousands: None,  formation_years: 0,
-        formation_month: 0,         formation_day: 0,
-        age_billions: Some(3),      age_millions: None,
-        age_thousands: None,        age_years: None,
-        age_months: None,           age_days: 0,
+    // ── Planet selection ──────────────────────────────────────────────────────
+    // Usage:
+    //   cargo run --example heatmap_export                  # earth-like, seed 0
+    //   cargo run --example heatmap_export -- earth [seed]  # earth-like, optional seed
+    //   cargo run --example heatmap_export -- oros          # Oros
+    let args: Vec<String> = std::env::args().collect();
+    let mode = args.get(1).map(|s| s.as_str()).unwrap_or("earth");
+
+    let (params, planet_name) = match mode {
+        "oros" => {
+            let null_age = EntityAge {
+                formation_billions: Some(3), formation_millions: None,
+                formation_thousands: None,   formation_years: 0,
+                formation_month: 0,          formation_day: 0,
+                age_billions: Some(3),       age_millions: None,
+                age_thousands: None,         age_years: None,
+                age_months: None,            age_days: 0,
+            };
+            let star = Star {
+                id:            Uuid::nil(),
+                name:          "Outer Reach Star".to_string(),
+                age:           EntityAge {
+                    formation_billions: Some(4), formation_millions: None,
+                    formation_thousands: None,   formation_years: 0,
+                    formation_month: 0,          formation_day: 0,
+                    age_billions: Some(4),       age_millions: None,
+                    age_thousands: None,         age_years: None,
+                    age_months: None,            age_days: 0,
+                },
+                kind:          StarKind::YellowDwarf,
+                luminosity:    1.08,
+                parent_id:     None,
+                companion_ids: None,
+                domain_exp:    HashMap::new(),
+            };
+            let oros = Planet {
+                id:              Uuid::parse_str("e3f92fd2-3501-40b4-957f-95d65dc4b51e").unwrap(),
+                name:            "Oros".to_string(),
+                age:             null_age,
+                parent_id:       None,
+                child_ids:       None,
+                coord:           CosmicCoordinates { x: 1.3, y: 0.0, z: 0.0 },
+                radius:          0.88,
+                gravity:         0.83,
+                axial_tilt:      22.0,
+                atmo:            HashMap::from([
+                    (AtmosphereTag::WaterVapor,    0.08),
+                    (AtmosphereTag::Nitrogen,      0.76),
+                    (AtmosphereTag::Oxygen,        0.15),
+                    (AtmosphereTag::CarbonDioxide, 0.01),
+                ]),
+                geo:             HashMap::from([
+                    (GeoTag::Silicate,    0.48),
+                    (GeoTag::Basaltic,    0.20),
+                    (GeoTag::Ferrous,     0.14),
+                    (GeoTag::Carbonate,   0.08),
+                    (GeoTag::Crystalline, 0.10),
+                ]),
+                volcanism:       0.20,
+                hydro:           HashMap::from([(LiquidTag::Water, 1.0)]),
+                liquid_coverage: 0.33,
+                civ_ids:         None,
+                species_ids:     None,
+                domain_exp:      HashMap::new(),
+                footprint:       Footprint { kind: HashMap::new() },
+            };
+            (PlanetParams::from_planet(&oros, &star), "Oros".to_string())
+        }
+        _ => {
+            let seed: u32 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+            (PlanetParams::earth_like(seed), "Earth-like".to_string())
+        }
     };
-    let star = Star {
-        id:            Uuid::nil(),
-        name:          "Outer Reach Star".to_string(),
-        age:           EntityAge { formation_billions: Some(4), formation_millions: None,
-                                   formation_thousands: None, formation_years: 0,
-                                   formation_month: 0, formation_day: 0,
-                                   age_billions: Some(4), age_millions: None,
-                                   age_thousands: None, age_years: None,
-                                   age_months: None, age_days: 0 },
-        kind:          StarKind::YellowDwarf,
-        luminosity:    1.08,
-        parent_id:     None,
-        companion_ids: None,
-        domain_exp:    HashMap::new(),
-    };
-    let oros = Planet {
-        id:             Uuid::parse_str("e3f92fd2-3501-40b4-957f-95d65dc4b51e").unwrap(),
-        name:           "Oros".to_string(),
-        age:            null_age,
-        parent_id:      None,
-        child_ids:      None,
-        coord:          CosmicCoordinates { x: 1.3, y: 0.0, z: 0.0 },
-        radius:         0.88,
-        gravity:        0.83,
-        axial_tilt:     22.0,
-        atmo:           HashMap::from([
-            (AtmosphereTag::WaterVapor,    0.08),
-            (AtmosphereTag::Nitrogen,      0.76),
-            (AtmosphereTag::Oxygen,        0.15),
-            (AtmosphereTag::CarbonDioxide, 0.01),
-        ]),
-        geo:            HashMap::from([
-            (GeoTag::Silicate,    0.48),
-            (GeoTag::Basaltic,    0.20),
-            (GeoTag::Ferrous,     0.14),
-            (GeoTag::Carbonate,   0.08),
-            (GeoTag::Crystalline, 0.10),
-        ]),
-        volcanism:      0.20,
-        hydro:          HashMap::from([(LiquidTag::Water, 1.0)]),
-        liquid_coverage: 0.33,
-        civ_ids:        None,
-        species_ids:    None,
-        domain_exp:     HashMap::new(),
-        footprint:      Footprint { kind: HashMap::new() },
-    };
-    let params = PlanetParams::from_planet(&oros, &star);
     let seed = params.seed;
 
     println!("Planet: {} | temp_baseline={:.2} temp_gradient={:.2} precip_moisture={:.3} sea_level={:.2}",
-        oros.name, params.temp_baseline, params.temp_gradient, params.precip_moisture, params.sea_level);
+        planet_name, params.temp_baseline, params.temp_gradient, params.precip_moisture, params.sea_level);
 
     const RENDER_SCALE: usize = 3;
     const N_DITHER_LEVELS: usize = 16;
