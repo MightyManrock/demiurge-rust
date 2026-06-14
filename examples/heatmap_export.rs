@@ -1,7 +1,7 @@
 use image::{ImageBuffer, Rgb};
 use noise::{Fbm, NoiseFn, Perlin};
 use std::cmp::Reverse;
-use std::collections::{BinaryHeap, VecDeque};
+use std::collections::{BinaryHeap, HashMap, VecDeque};
 
 // ── Data structures ──────────────────────────────────────────────────────────
 
@@ -954,6 +954,186 @@ fn cell_hash(x: usize, y: usize) -> f64 {
     (h & 0xFFFF) as f64 / 65535.0
 }
 
+// ── Region detection ─────────────────────────────────────────────────────────
+
+/// 4-connected neighbors for region detection. x wraps east-west; y clamps at poles.
+fn neighbors_4(x: usize, y: usize, width: usize, height: usize) -> Vec<(usize, usize)> {
+    let mut out = Vec::with_capacity(4);
+    out.push(((x + width - 1) % width, y));
+    out.push(((x + 1) % width, y));
+    if y > 0 { out.push((x, y - 1)); }
+    if y < height - 1 { out.push((x, y + 1)); }
+    out
+}
+
+/// Aggregate description of a detected geographic region.
+struct Region {
+    id:           u32,
+    size:         usize,
+    mean_elev:    f64,
+    mean_temp:    f64,
+    mean_precip:  f64,
+    mean_aridity: f64,
+    ocean_frac:   f64,
+    glacier_frac: f64,
+    sea_ice_frac: f64,
+}
+
+impl Region {
+    fn character(&self) -> &'static str {
+        if self.sea_ice_frac > 0.5   { return "Sea Ice"; }
+        if self.glacier_frac > 0.5   { return "Glacier / Ice Sheet"; }
+        if self.ocean_frac > 0.5 {
+            if self.mean_temp < 0.20 { return "Polar Ocean"; }
+            if self.mean_temp < 0.50 { return "Cold Ocean"; }
+            if self.mean_temp < 0.70 { return "Temperate Ocean"; }
+            return "Tropical Ocean";
+        }
+        if self.mean_temp < 0.20 {
+            if self.mean_precip < 0.20 { return "Polar Desert"; }
+            return "Tundra";
+        }
+        if self.mean_temp < 0.35 {
+            if self.mean_precip < 0.20 { return "Cold Desert"; }
+            return "Boreal Forest";
+        }
+        if self.mean_temp < 0.55 {
+            if self.mean_precip < 0.15 { return "Temperate Desert"; }
+            if self.mean_precip < 0.35 { return "Steppe"; }
+            if self.mean_precip < 0.60 { return "Temperate Forest"; }
+            return "Temperate Rainforest";
+        }
+        if self.mean_temp < 0.70 {
+            if self.mean_precip < 0.20 { return "Hot Desert"; }
+            if self.mean_precip < 0.45 { return "Mediterranean"; }
+            return "Subtropical Forest";
+        }
+        if self.mean_precip < 0.20 { return "Tropical Desert"; }
+        if self.mean_precip < 0.45 { return "Savanna"; }
+        if self.mean_precip < 0.65 { return "Tropical Dry Forest"; }
+        "Tropical Rainforest"
+    }
+}
+
+/// Segment the map into geographic regions by multi-dimensional flood fill.
+///
+/// Cells are grouped with 4-connected BFS; two adjacent cells join the same
+/// region if their Euclidean distance across (elevation, temperature,
+/// precipitation) is ≤ `threshold`. Regions smaller than `min_size` cells
+/// are absorbed into their most-contacted neighbor.
+///
+/// Returns a flat region-ID map (one u32 per pixel) and a Vec<Region> sorted
+/// largest-first.
+fn detect_regions(
+    elevation:    &HeatMap,
+    temperature:  &HeatMap,
+    precipitation: &HeatMap,
+    aridity:      &HeatMap,
+    is_ocean:     &[bool],
+    is_glacier:   &[bool],
+    is_sea_ice:   &[bool],
+    threshold:    f64,
+    min_size:     usize,
+) -> (Vec<u32>, Vec<Region>) {
+    let width  = elevation.width;
+    let height = elevation.height;
+    let n      = width * height;
+
+    let mut region_map:   Vec<u32>       = vec![u32::MAX; n];
+    let mut region_cells: Vec<Vec<usize>> = Vec::new();
+
+    // Phase 1: BFS flood fill from each unvisited seed.
+    // Similarity is checked against the SEED cell, not the frontier cell, to
+    // prevent regions from drifting across gradual transitions (e.g. the entire
+    // ocean chaining pole-to-equator one small step at a time).
+    for start in 0..n {
+        if region_map[start] != u32::MAX { continue; }
+        let id = region_cells.len() as u32;
+        let mut cells = Vec::new();
+        let mut queue = VecDeque::new();
+        queue.push_back(start);
+        region_map[start] = id;
+
+        let se = elevation.data[start];
+        let st = temperature.data[start];
+        let sp = precipitation.data[start];
+
+        while let Some(idx) = queue.pop_front() {
+            cells.push(idx);
+            let x = idx % width;
+            let y = idx / width;
+            for (nx, ny) in neighbors_4(x, y, width, height) {
+                let nidx = ny * width + nx;
+                if region_map[nidx] != u32::MAX { continue; }
+                let de = se - elevation.data[nidx];
+                let dt = st - temperature.data[nidx];
+                let dp = sp - precipitation.data[nidx];
+                if (de * de + dt * dt + dp * dp).sqrt() <= threshold {
+                    region_map[nidx] = id;
+                    queue.push_back(nidx);
+                }
+            }
+        }
+        region_cells.push(cells);
+    }
+
+    // Phase 2: Absorb regions below min_size into their most-contacted neighbor,
+    // processing smallest-first so orphan slivers merge before their targets do.
+    loop {
+        let small = region_cells.iter().enumerate()
+            .filter(|(_, c)| !c.is_empty() && c.len() < min_size)
+            .min_by_key(|(_, c)| c.len())
+            .map(|(i, _)| i);
+        let Some(sid) = small else { break };
+
+        let mut counts: HashMap<u32, usize> = HashMap::new();
+        for &idx in &region_cells[sid] {
+            let x = idx % width;
+            let y = idx / width;
+            for (nx, ny) in neighbors_4(x, y, width, height) {
+                let nid = region_map[ny * width + nx];
+                if nid != sid as u32 { *counts.entry(nid).or_default() += 1; }
+            }
+        }
+        if let Some((&target, _)) = counts.iter().max_by_key(|&(_, &c)| c) {
+            let cells = std::mem::take(&mut region_cells[sid]);
+            for &idx in &cells { region_map[idx] = target; }
+            region_cells[target as usize].extend(cells);
+        } else {
+            region_cells[sid].clear(); // isolated — discard
+        }
+    }
+
+    // Phase 3: Compact IDs and build Region structs.
+    let mut new_id = 0u32;
+    let mut id_remap: Vec<u32> = vec![u32::MAX; region_cells.len()];
+    for (i, cells) in region_cells.iter().enumerate() {
+        if !cells.is_empty() { id_remap[i] = new_id; new_id += 1; }
+    }
+    for v in region_map.iter_mut() { *v = id_remap[*v as usize]; }
+
+    let mut regions: Vec<Region> = region_cells.iter().enumerate()
+        .filter(|(_, c)| !c.is_empty())
+        .map(|(old_id, cells)| {
+            let sf = cells.len() as f64;
+            Region {
+                id:           id_remap[old_id],
+                size:         cells.len(),
+                mean_elev:    cells.iter().map(|&i| elevation.data[i]).sum::<f64>()    / sf,
+                mean_temp:    cells.iter().map(|&i| temperature.data[i]).sum::<f64>()  / sf,
+                mean_precip:  cells.iter().map(|&i| precipitation.data[i]).sum::<f64>() / sf,
+                mean_aridity: cells.iter().map(|&i| aridity.data[i]).sum::<f64>()      / sf,
+                ocean_frac:   cells.iter().filter(|&&i| is_ocean[i]).count()   as f64 / sf,
+                glacier_frac: cells.iter().filter(|&&i| is_glacier[i]).count() as f64 / sf,
+                sea_ice_frac: cells.iter().filter(|&&i| is_sea_ice[i]).count() as f64 / sf,
+            }
+        })
+        .collect();
+
+    regions.sort_unstable_by(|a, b| b.size.cmp(&a.size));
+    (region_map, regions)
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 fn main() {
@@ -1187,4 +1367,52 @@ fn main() {
     });
     composite.save("composite.png").expect("failed to save composite.png");
     println!("Saved composite.png");
+
+    // ── Region detection ─────────────────────────────────────────────────────
+    const REGION_THRESHOLD: f64 = 0.25;
+    const REGION_MIN_SIZE:  usize = 400;
+    println!("Detecting regions (threshold={REGION_THRESHOLD}, min_size={REGION_MIN_SIZE})...");
+    let (region_map, regions) = detect_regions(
+        &elevation, &temperature, &precipitation, &aridity,
+        &is_ocean, &is_glacier, &is_sea_ice,
+        REGION_THRESHOLD, REGION_MIN_SIZE,
+    );
+
+    let total_cells = (width * height) as f64;
+    println!();
+    println!("=== {} regions detected ===", regions.len());
+    println!();
+    println!("{:>4}  {:>7}  {:>6}  {:>5}  {:>5}  {:>6}  {:>5}  {}",
+        "ID", "Cells", "%", "Elev", "Temp", "Precip", "Arid", "Character");
+    println!("{}", "─".repeat(68));
+    for r in &regions {
+        println!("{:>4}  {:>7}  {:>5.1}%  {:>5.2}  {:>5.2}  {:>6.2}  {:>5.2}  {}",
+            r.id,
+            r.size,
+            r.size as f64 / total_cells * 100.0,
+            r.mean_elev,
+            r.mean_temp,
+            r.mean_precip,
+            r.mean_aridity,
+            r.character(),
+        );
+    }
+    println!("{}", "─".repeat(68));
+    println!();
+
+    // Region composite: base composite with red outlines at region boundaries.
+    println!("Rendering region map at {}x{}...", render_width, render_height);
+    let region_composite = ImageBuffer::from_fn(render_width as u32, render_height as u32, |rx, ry| {
+        let dx = rx as usize / RENDER_SCALE;
+        let dy = ry as usize / RENDER_SCALE;
+        let cur = region_map[dy * width + dx];
+        let is_boundary = [(-1i64, 0i64), (1, 0), (0, -1), (0, 1)].iter().any(|&(ddx, ddy)| {
+            let ndx = (dx as i64 + ddx).rem_euclid(width as i64) as usize;
+            let ndy = (dy as i64 + ddy).clamp(0, height as i64 - 1) as usize;
+            region_map[ndy * width + ndx] != cur
+        });
+        if is_boundary { Rgb([220u8, 30, 30]) } else { *composite.get_pixel(rx, ry) }
+    });
+    region_composite.save("regions.png").expect("failed to save regions.png");
+    println!("Saved regions.png");
 }
