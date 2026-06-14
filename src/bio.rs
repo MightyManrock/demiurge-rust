@@ -45,8 +45,16 @@ pub enum RespirationMedium {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct Solvent {
+    pub liquid: LiquidTag,
+    pub access_range: Option<Range<f32>>,
+    pub humidity_range: Option<Range<f32>>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AtmosphereAffinity {
     pub tag: Option<AtmosphereTag>,
+    pub threshold: Option<Range<f32>>,
     pub relationship: AtmosphereRelationship,
     pub medium: RespirationMedium,
 }
@@ -105,7 +113,7 @@ pub struct Species {
     pub origin_world_id: Uuid,
     pub sentience: Option<SpeciesSentience>,
     pub basis: LifeBasis,
-    pub solvent: LiquidTag,
+    pub solvent: Solvent,
     pub atmo_aff: Vec<AtmosphereAffinity>,
     pub food_tag: Vec<FoodTag>,
     pub repro_profile: ReproductionProfile,

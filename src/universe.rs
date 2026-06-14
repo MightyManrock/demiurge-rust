@@ -148,6 +148,7 @@ pub struct Planet {
     pub coord: CosmicCoordinates,
     pub radius: f32,
     pub gravity: f32,
+    pub base_press: f32,
     pub axial_tilt: f32,
     pub atmo: HashMap<AtmosphereTag, f32>,
     pub geo: HashMap<GeoTag, f32>,

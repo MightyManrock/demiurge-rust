@@ -1577,6 +1577,7 @@ fn main() {
                 coord:           CosmicCoordinates { x: 1.3, y: 0.0, z: 0.0 },
                 radius:          0.88,
                 gravity:         0.83,
+                base_press:      84.7,
                 axial_tilt:      22.0,
                 atmo:            HashMap::from([
                     (AtmosphereTag::WaterVapor,    0.08),

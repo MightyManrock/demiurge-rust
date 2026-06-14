@@ -20,40 +20,53 @@ fn main() {
         origin_world_id: Uuid::new_v4(),
         sentience: Some(bio::SpeciesSentience::Sapient),
         basis: bio::LifeBasis::Carbon,
-        solvent: universe::LiquidTag::Water,
+        solvent: {
+            bio::Solvent {
+                liquid: universe::LiquidTag::Water,
+                access_range: Some(common::Range { min: 0.02, max: 0.75}),
+                humidity_range: Some(common::Range { min: 0.15, max: 0.85}),
+            }
+        },  
         atmo_aff: vec![
             bio::AtmosphereAffinity {
                 tag: Some(universe::AtmosphereTag::Oxygen),
+                threshold: Some(common::Range { min: 0.19, max: 0.23 }),
                 relationship: bio::AtmosphereRelationship::Required,
                 medium: bio::RespirationMedium::Gas,
             },
             bio::AtmosphereAffinity {
                 tag: Some(universe::AtmosphereTag::CarbonMonoxide),
+                threshold: Some(common::Range { min: 0.002, max: 1.0 }),
                 relationship: bio::AtmosphereRelationship::Toxic,
                 medium: bio::RespirationMedium::Gas,
             },
             bio::AtmosphereAffinity {
                 tag: Some(universe::AtmosphereTag::Methane),
+                threshold: Some(common::Range { min: 0.05, max: 1.0 }),
                 relationship: bio::AtmosphereRelationship::Fatal,
                 medium: bio::RespirationMedium::Gas,
             },
             bio::AtmosphereAffinity {
                 tag: Some(universe::AtmosphereTag::CarbonDioxide),
+                threshold: Some(common::Range { min: 0.0, max: 0.01 }),
                 relationship: bio::AtmosphereRelationship::Tolerated,
                 medium: bio::RespirationMedium::Gas,
             },
             bio::AtmosphereAffinity {
                 tag: None,
+                threshold: None,
                 relationship: bio::AtmosphereRelationship::Fatal,
                 medium: bio::RespirationMedium::Liquid,
             },
             bio::AtmosphereAffinity {
                 tag: None,
+                threshold: None,
                 relationship: bio::AtmosphereRelationship::Fatal,
                 medium: bio::RespirationMedium::Solid,
             },
             bio::AtmosphereAffinity {
                 tag: None,
+                threshold: None,
                 relationship: bio::AtmosphereRelationship::Fatal,
                 medium: bio::RespirationMedium::Vacuum,
             },
