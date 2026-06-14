@@ -1535,9 +1535,9 @@ fn main() {
 
     // ── Planet selection ──────────────────────────────────────────────────────
     // Usage:
-    //   cargo run --example heatmap_export                  # earth-like, seed 0
-    //   cargo run --example heatmap_export -- earth [seed]  # earth-like, optional seed
-    //   cargo run --example heatmap_export -- oros          # Oros
+    //   cargo run --example heatmap_export                        # earth-like, seed 0
+    //   cargo run --example heatmap_export -- earth <uuid|u32>   # earth-like, UUID or raw seed
+    //   cargo run --example heatmap_export -- oros                # Oros
     let args: Vec<String> = std::env::args().collect();
     let mode = args.get(1).map(|s| s.as_str()).unwrap_or("earth");
 
@@ -1602,7 +1602,19 @@ fn main() {
             (PlanetParams::from_planet(&oros, &star), "Oros".to_string())
         }
         _ => {
-            let seed: u32 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+            let seed: u32 = match args.get(2).map(|s| s.as_str()) {
+                Some(s) => {
+                    if let Ok(uuid) = Uuid::parse_str(s) {
+                        seed_from_uuid(*uuid.as_bytes())
+                    } else if let Ok(n) = s.parse::<u32>() {
+                        n
+                    } else {
+                        eprintln!("unrecognized seed '{}' — expected a UUID or u32, using 0", s);
+                        0
+                    }
+                }
+                None => 0,
+            };
             (PlanetParams::earth_like(seed), "Earth-like".to_string())
         }
     };
