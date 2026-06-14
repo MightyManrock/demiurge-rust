@@ -1015,25 +1015,43 @@ impl Region {
     }
 }
 
+/// Cell classification for region detection.
+#[derive(Clone, Copy, PartialEq)]
+enum CellKind { Frozen, Ocean, Land }
+
+fn cell_kind(idx: usize, is_ocean: &[bool], is_glacier: &[bool], is_sea_ice: &[bool]) -> CellKind {
+    if is_sea_ice[idx] || is_glacier[idx] { CellKind::Frozen }
+    else if is_ocean[idx]                  { CellKind::Ocean  }
+    else                                   { CellKind::Land   }
+}
+
 /// Segment the map into geographic regions by multi-dimensional flood fill.
 ///
-/// Cells are grouped with 4-connected BFS; two adjacent cells join the same
-/// region if their Euclidean distance across (elevation, temperature,
-/// precipitation) is ≤ `threshold`. Regions smaller than `min_size` cells
-/// are absorbed into their most-contacted neighbor.
+/// Three cell types are recognized: **Frozen** (sea ice or glacier), **Ocean**,
+/// and **Land**. A BFS region may only expand into cells of its own type —
+/// there is a hard barrier between open ocean and open land. Frozen cells form
+/// their own pool and may freely mix sea ice and glaciated land.
+///
+/// `land_threshold` and `ocean_threshold` are the Euclidean similarity cutoffs
+/// across (elevation, temperature, precipitation); ocean and frozen regions use
+/// the laxer ocean threshold so the seas consolidate into fewer large regions.
+///
+/// Regions smaller than `min_size` cells are absorbed into their most-contacted
+/// same-type neighbor.
 ///
 /// Returns a flat region-ID map (one u32 per pixel) and a Vec<Region> sorted
 /// largest-first.
 fn detect_regions(
-    elevation:    &HeatMap,
-    temperature:  &HeatMap,
-    precipitation: &HeatMap,
-    aridity:      &HeatMap,
-    is_ocean:     &[bool],
-    is_glacier:   &[bool],
-    is_sea_ice:   &[bool],
-    threshold:    f64,
-    min_size:     usize,
+    elevation:       &HeatMap,
+    temperature:     &HeatMap,
+    precipitation:   &HeatMap,
+    aridity:         &HeatMap,
+    is_ocean:        &[bool],
+    is_glacier:      &[bool],
+    is_sea_ice:      &[bool],
+    land_threshold:  f64,
+    ocean_threshold: f64,
+    min_size:        usize,
 ) -> (Vec<u32>, Vec<Region>) {
     let width  = elevation.width;
     let height = elevation.height;
@@ -1041,14 +1059,17 @@ fn detect_regions(
 
     let mut region_map:   Vec<u32>       = vec![u32::MAX; n];
     let mut region_cells: Vec<Vec<usize>> = Vec::new();
+    let mut region_kind:  Vec<CellKind>  = Vec::new();
 
     // Phase 1: BFS flood fill from each unvisited seed.
     // Similarity is checked against the SEED cell, not the frontier cell, to
-    // prevent regions from drifting across gradual transitions (e.g. the entire
-    // ocean chaining pole-to-equator one small step at a time).
+    // prevent regions from drifting across gradual transitions.
+    // Expansion is blocked across cell-kind boundaries (ocean ↔ land).
     for start in 0..n {
         if region_map[start] != u32::MAX { continue; }
-        let id = region_cells.len() as u32;
+        let id   = region_cells.len() as u32;
+        let kind = cell_kind(start, is_ocean, is_glacier, is_sea_ice);
+        let thr  = if kind == CellKind::Land { land_threshold } else { ocean_threshold };
         let mut cells = Vec::new();
         let mut queue = VecDeque::new();
         queue.push_back(start);
@@ -1065,16 +1086,18 @@ fn detect_regions(
             for (nx, ny) in neighbors_4(x, y, width, height) {
                 let nidx = ny * width + nx;
                 if region_map[nidx] != u32::MAX { continue; }
+                if cell_kind(nidx, is_ocean, is_glacier, is_sea_ice) != kind { continue; }
                 let de = se - elevation.data[nidx];
                 let dt = st - temperature.data[nidx];
                 let dp = sp - precipitation.data[nidx];
-                if (de * de + dt * dt + dp * dp).sqrt() <= threshold {
+                if (de * de + dt * dt + dp * dp).sqrt() <= thr {
                     region_map[nidx] = id;
                     queue.push_back(nidx);
                 }
             }
         }
         region_cells.push(cells);
+        region_kind.push(kind);
     }
 
     // Phase 2: Absorb regions below min_size into their most-contacted neighbor,
@@ -1087,12 +1110,15 @@ fn detect_regions(
         let Some(sid) = small else { break };
 
         let mut counts: HashMap<u32, usize> = HashMap::new();
+        let skind = region_kind[sid];
         for &idx in &region_cells[sid] {
             let x = idx % width;
             let y = idx / width;
             for (nx, ny) in neighbors_4(x, y, width, height) {
                 let nid = region_map[ny * width + nx];
-                if nid != sid as u32 { *counts.entry(nid).or_default() += 1; }
+                if nid != sid as u32 && region_kind[nid as usize] == skind {
+                    *counts.entry(nid).or_default() += 1;
+                }
             }
         }
         if let Some((&target, _)) = counts.iter().max_by_key(|&(_, &c)| c) {
@@ -1110,7 +1136,9 @@ fn detect_regions(
     for (i, cells) in region_cells.iter().enumerate() {
         if !cells.is_empty() { id_remap[i] = new_id; new_id += 1; }
     }
-    for v in region_map.iter_mut() { *v = id_remap[*v as usize]; }
+    for v in region_map.iter_mut() {
+        if *v != u32::MAX { *v = id_remap[*v as usize]; }
+    }
 
     let mut regions: Vec<Region> = region_cells.iter().enumerate()
         .filter(|(_, c)| !c.is_empty())
@@ -1369,13 +1397,16 @@ fn main() {
     println!("Saved composite.png");
 
     // ── Region detection ─────────────────────────────────────────────────────
-    const REGION_THRESHOLD: f64 = 0.25;
-    const REGION_MIN_SIZE:  usize = 400;
-    println!("Detecting regions (threshold={REGION_THRESHOLD}, min_size={REGION_MIN_SIZE})...");
+    const LAND_THRESHOLD:  f64   = 0.25;
+    const OCEAN_THRESHOLD: f64   = 0.55;
+    const REGION_MIN_SIZE: usize = 400;
+    println!(
+        "Detecting regions (land_thr={LAND_THRESHOLD}, ocean_thr={OCEAN_THRESHOLD}, min_size={REGION_MIN_SIZE})..."
+    );
     let (region_map, regions) = detect_regions(
         &elevation, &temperature, &precipitation, &aridity,
         &is_ocean, &is_glacier, &is_sea_ice,
-        REGION_THRESHOLD, REGION_MIN_SIZE,
+        LAND_THRESHOLD, OCEAN_THRESHOLD, REGION_MIN_SIZE,
     );
 
     let total_cells = (width * height) as f64;
