@@ -181,7 +181,7 @@ impl HeatMap {
     /// westerly weight. The double-pass handles the east-west seam: carry from
     /// the end of each row's first pass seeds the second pass, so moisture
     /// wraps around the globe correctly.
-    fn generate_precipitation(elevation: &HeatMap, is_ocean: &[bool], temperature: &HeatMap) -> HeatMap {
+    fn generate_precipitation(elevation: &HeatMap, is_ocean: &[bool], temperature: &HeatMap, is_sea_ice: &[bool]) -> HeatMap {
         let width = elevation.width;
         let height = elevation.height;
         let n = width * height;
@@ -207,7 +207,8 @@ impl HeatMap {
                 let x = pass_x % width;
                 let idx = y * width + x;
                 if is_ocean[idx] {
-                    carry = 1.0;
+                    // Sea ice dramatically reduces evaporation; open ocean = full moisture.
+                    carry = if is_sea_ice[idx] { SEA_ICE_EVAP_FACTOR } else { 1.0 };
                 } else {
                     let upwind_x = (x + width - 1) % width;
                     let raw_gain =
@@ -230,7 +231,7 @@ impl HeatMap {
                 let x = (width - 1) - (pass_i % width);
                 let idx = y * width + x;
                 if is_ocean[idx] {
-                    carry = 1.0;
+                    carry = if is_sea_ice[idx] { SEA_ICE_EVAP_FACTOR } else { 1.0 };
                 } else {
                     let upwind_x = (x + 1) % width;
                     let raw_gain =
@@ -670,6 +671,22 @@ fn generate_glacier(temperature: &HeatMap, is_ocean: &[bool]) -> Vec<bool> {
         .collect()
 }
 
+/// Ocean cells below this temperature are frozen over as sea ice.
+/// Slightly lower than GLACIER_TEMP_THRESHOLD — open ocean stays liquid a bit
+/// longer than land surfaces due to its heat capacity.
+const SEA_ICE_TEMP_THRESHOLD: f64 = 0.14;
+
+/// Fraction of normal ocean evaporation that sea ice permits.
+/// Ice-covered ocean contributes much less moisture to the atmosphere.
+const SEA_ICE_EVAP_FACTOR: f64 = 0.25;
+
+/// Returns a bool mask: true where an ocean cell is frozen.
+fn generate_sea_ice(temperature: &HeatMap, is_ocean: &[bool]) -> Vec<bool> {
+    (0..temperature.data.len())
+        .map(|i| is_ocean[i] && temperature.data[i] < SEA_ICE_TEMP_THRESHOLD)
+        .collect()
+}
+
 // ── Color functions ──────────────────────────────────────────────────────────
 
 fn lerp_color(a: [u8; 3], b: [u8; 3], t: f64) -> [u8; 3] {
@@ -769,6 +786,20 @@ fn precipitation_color(t: f64) -> [u8; 3] {
             ([40, 130, 60], 0.60),   // wet
             ([20, 90, 130], 0.80),   // very wet
             ([10, 50, 180], 1.00),   // monsoon / extremely wet
+        ],
+    )
+}
+
+/// Sea ice color: flat white-grey, slightly more grey than land glacier to read
+/// as a different surface. Dithers to ocean at its warm edge.
+fn sea_ice_color(t: f64) -> [u8; 3] {
+    let normalized = (t / SEA_ICE_TEMP_THRESHOLD).clamp(0.0, 1.0);
+    sample_gradient(
+        normalized,
+        &[
+            ([240, 245, 250], 0.00), // coldest — near-white
+            ([195, 215, 230], 0.70), // mid — grey-blue
+            ([160, 195, 220], 1.00), // warmest edge — more clearly blue-grey
         ],
     )
 }
@@ -967,7 +998,8 @@ fn main() {
 
     println!("Generating climate...");
     let temperature = HeatMap::generate_temperature(&elevation);
-    let precipitation = HeatMap::generate_precipitation(&elevation, &is_ocean, &temperature);
+    let is_sea_ice = generate_sea_ice(&temperature, &is_ocean);
+    let precipitation = HeatMap::generate_precipitation(&elevation, &is_ocean, &temperature, &is_sea_ice);
     let is_glacier = generate_glacier(&temperature, &is_ocean);
     let aridity = HeatMap::generate_aridity(&temperature, &precipitation);
 
@@ -1007,6 +1039,19 @@ fn main() {
     });
     glacier_img.save("glacier.png").expect("failed to save glacier.png");
     println!("Saved glacier.png");
+
+    let sea_ice_img = ImageBuffer::from_fn(width as u32, height as u32, |x, y| {
+        let idx = y as usize * width + x as usize;
+        let nx = x as f64 / width as f64;
+        let ny = y as f64 / height as f64;
+        if is_sea_ice[idx] {
+            Rgb(sea_ice_color(temperature.sample(nx, ny)))
+        } else {
+            Rgb([0u8, 0, 0])
+        }
+    });
+    sea_ice_img.save("sea_ice.png").expect("failed to save sea_ice.png");
+    println!("Saved sea_ice.png");
 
     println!("Generating hydrology...");
     let result = HeatMap::generate_hydrology(&elevation, &is_ocean, &precipitation, &is_glacier, &params);
@@ -1067,13 +1112,58 @@ fn main() {
             BAYER_4X4[ry as usize % 4][rx as usize % 4] < coverage
         };
         let data_idx = (ry as usize / RENDER_SCALE) * width + (rx as usize / RENDER_SCALE);
-        let mut color = if is_water {
+        let dx = rx as usize / RENDER_SCALE;
+        let dy = ry as usize / RENDER_SCALE;
+        let off_x = rx as usize % RENDER_SCALE;
+        let off_y = ry as usize % RENDER_SCALE;
+        let mut color = if is_water && is_sea_ice[data_idx] {
+            // Sea ice: dither at the warm boundary toward open ocean.
+            let sea_ice_neighbor = |ndx: i64, ndy: i64| -> bool {
+                let nnx = ndx.rem_euclid(width as i64) as usize;
+                let nny = ndy.clamp(0, height as i64 - 1) as usize;
+                is_sea_ice[nny * width + nnx]
+            };
+            const SEA_ICE_EDGE: f64 = 0.05;
+            let mut coverage = 1.0f64;
+            if off_x == 0 && !sea_ice_neighbor(dx as i64 - 1, dy as i64) { coverage = SEA_ICE_EDGE; }
+            if off_x == 2 && !sea_ice_neighbor(dx as i64 + 1, dy as i64) { coverage = SEA_ICE_EDGE; }
+            if off_y == 0 && !sea_ice_neighbor(dx as i64, dy as i64 - 1) { coverage = SEA_ICE_EDGE; }
+            if off_y == 2 && !sea_ice_neighbor(dx as i64, dy as i64 + 1) { coverage = SEA_ICE_EDGE; }
+            if BAYER_4X4[ry as usize % 4][rx as usize % 4] < coverage {
+                let t = temperature.sample(nx, ny);
+                let d = bayer_dither(t / SEA_ICE_TEMP_THRESHOLD, rx as usize, ry as usize, N_DITHER_LEVELS);
+                sea_ice_color(d)
+            } else {
+                let d = bayer_dither(hydro_nearest, rx as usize, ry as usize, N_DITHER_LEVELS).max(0.01);
+                water_color(d)
+            }
+        } else if is_water {
             let d = bayer_dither(hydro_nearest, rx as usize, ry as usize, N_DITHER_LEVELS).max(0.01);
             water_color(d)
         } else if is_glacier[data_idx] {
-            let t = temperature.sample(nx, ny);
-            let d = bayer_dither(t / GLACIER_TEMP_THRESHOLD, rx as usize, ry as usize, N_DITHER_LEVELS);
-            glacier_color(d)
+            // Dither glacier edges against adjacent non-glaciated land, same pattern as water edges.
+            let non_glacier_land = |ndx: i64, ndy: i64| -> bool {
+                let nnx = ndx.rem_euclid(width as i64) as usize;
+                let nny = ndy.clamp(0, height as i64 - 1) as usize;
+                let nidx = nny * width + nnx;
+                !is_glacier[nidx] && !is_ocean[nidx] && result.map.data[nidx] <= 0.0
+            };
+            const GLACIER_EDGE: f64 = 0.05;
+            let mut coverage = 1.0f64;
+            if off_x == 0 && non_glacier_land(dx as i64 - 1, dy as i64) { coverage = GLACIER_EDGE; }
+            if off_x == 2 && non_glacier_land(dx as i64 + 1, dy as i64) { coverage = GLACIER_EDGE; }
+            if off_y == 0 && non_glacier_land(dx as i64, dy as i64 - 1) { coverage = GLACIER_EDGE; }
+            if off_y == 2 && non_glacier_land(dx as i64, dy as i64 + 1) { coverage = GLACIER_EDGE; }
+            if BAYER_4X4[ry as usize % 4][rx as usize % 4] < coverage {
+                let t = temperature.sample(nx, ny);
+                let d = bayer_dither(t / GLACIER_TEMP_THRESHOLD, rx as usize, ry as usize, N_DITHER_LEVELS);
+                glacier_color(d)
+            } else {
+                let elev_t = elevation.sample(nx, ny);
+                let land_t = ((elev_t - params.sea_level) / (1.0 - params.sea_level)).clamp(0.0, 1.0);
+                let d = bayer_dither(land_t, rx as usize, ry as usize, N_DITHER_LEVELS);
+                terrain_color(d)
+            }
         } else {
             let t = elevation.sample(nx, ny);
             let land_t = ((t - params.sea_level) / (1.0 - params.sea_level)).clamp(0.0, 1.0);
