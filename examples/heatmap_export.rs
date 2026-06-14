@@ -964,13 +964,13 @@ fn salt_flat_color(aridity: f64) -> [u8; 3] {
     )
 }
 
-/// Habitability gradient: dark gray (0%) → red → yellow (50%) → green → gold (100%).
+/// Habitability gradient: dark gray (0%) → red → yellow (50%) → green → vivid cyan (100%).
 fn habitability_color(t: f64) -> [u8; 3] {
     if t <= 0.0 {
         return [45, 45, 45];
     }
     if t >= 1.0 {
-        return [255, 215, 0]; // gold
+        return [0, 234, 255]; // vivid cyan
     }
     sample_gradient(
         t,
