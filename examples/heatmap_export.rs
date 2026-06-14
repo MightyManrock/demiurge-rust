@@ -968,19 +968,20 @@ fn neighbors_4(x: usize, y: usize, width: usize, height: usize) -> Vec<(usize, u
 
 /// Aggregate description of a detected geographic region.
 struct Region {
-    id:           u32,
-    size:         usize,
-    mean_elev:    f64,
-    mean_temp:    f64,
-    mean_precip:  f64,
-    mean_aridity: f64,
-    ocean_frac:   f64,
-    glacier_frac: f64,
-    sea_ice_frac: f64,
+    id:                u32,
+    size:              usize,
+    mean_elev:         f64,
+    mean_temp:         f64,
+    mean_precip:       f64,
+    mean_aridity:      f64,
+    ocean_frac:        f64,
+    glacier_frac:      f64,
+    sea_ice_frac:      f64,
+    island_components: usize, // 0 = continental, 1 = island, >1 = archipelago
 }
 
 impl Region {
-    fn character(&self) -> &'static str {
+    fn climate_character(&self) -> &'static str {
         if self.sea_ice_frac > 0.5   { return "Sea Ice"; }
         if self.glacier_frac > 0.5   { return "Glacier / Ice Sheet"; }
         if self.ocean_frac > 0.5 {
@@ -1012,6 +1013,15 @@ impl Region {
         if self.mean_precip < 0.45 { return "Savanna"; }
         if self.mean_precip < 0.65 { return "Tropical Dry Forest"; }
         "Tropical Rainforest"
+    }
+
+    fn character(&self) -> String {
+        let base = self.climate_character();
+        match self.island_components {
+            0 => base.to_string(),
+            1 => format!("{base} Island"),
+            _ => format!("{base} Archipelago"),
+        }
     }
 }
 
@@ -1130,6 +1140,146 @@ fn detect_regions(
         }
     }
 
+    // Phase 2.5: Island detection pass.
+    // Land cells discarded by min_size merging are either absorbed into a nearby
+    // continental region (within COAST_DIST ocean hops) or grouped into standalone
+    // island / archipelago regions via ocean BFS (within ARCH_DIST ocean hops).
+    const ISLAND_COAST_DIST: usize = 3;
+    const ISLAND_ARCH_DIST:  usize = 25;
+
+    // Per-region island-component count (0 = continental).  New island regions are
+    // appended to region_cells below; their counts are pushed in lock-step.
+    let mut island_parts: Vec<usize> = vec![0; region_cells.len()];
+
+    // Snapshot which cells are free land: their Phase-1 region was discarded in Phase 2.
+    // Computed before any region_map mutations so absorbed cells are detectable later.
+    let free_land: Vec<bool> = (0..n).map(|idx| {
+        let rid = region_map[idx] as usize;
+        region_cells[rid].is_empty() && region_kind[rid] == CellKind::Land
+    }).collect();
+
+    // Group free-land cells by original region ID (each ID = one connected component).
+    let mut comp_map: HashMap<u32, Vec<usize>> = HashMap::new();
+    for idx in 0..n {
+        if free_land[idx] { comp_map.entry(region_map[idx]).or_default().push(idx); }
+    }
+    let island_components: Vec<(u32, Vec<usize>)> = comp_map.into_iter().collect();
+    let n_comps = island_components.len();
+
+    // Step B+C: BFS from each component outward through ocean/frozen cells.
+    // If a continental land region is reachable within COAST_DIST hops, absorb there.
+    let mut coast_targets: Vec<Option<u32>> = vec![None; n_comps];
+    for (ii, (_, icells)) in island_components.iter().enumerate() {
+        let mut dist: Vec<u8> = vec![u8::MAX; n];
+        let mut queue = VecDeque::new();
+        for &idx in icells { dist[idx] = 0; queue.push_back(idx); }
+        'coast: while let Some(idx) = queue.pop_front() {
+            let x = idx % width;
+            let y = idx / width;
+            for (nx, ny) in neighbors_4(x, y, width, height) {
+                let nidx = ny * width + nx;
+                if dist[nidx] != u8::MAX { continue; }
+                // Non-free, non-ocean, non-frozen → must be a continental land cell.
+                if !free_land[nidx] && !is_ocean[nidx] && !is_glacier[nidx] && !is_sea_ice[nidx] {
+                    coast_targets[ii] = Some(region_map[nidx]);
+                    break 'coast;
+                }
+                let nd = dist[idx].saturating_add(1);
+                if (is_ocean[nidx] || is_glacier[nidx] || is_sea_ice[nidx])
+                    && nd <= ISLAND_COAST_DIST as u8
+                {
+                    dist[nidx] = nd;
+                    queue.push_back(nidx);
+                }
+            }
+        }
+    }
+
+    // Apply coastal absorptions.
+    for (ii, (_, icells)) in island_components.iter().enumerate() {
+        if let Some(target) = coast_targets[ii] {
+            for &idx in icells { region_map[idx] = target; }
+            region_cells[target as usize].extend_from_slice(icells);
+        }
+    }
+
+    // Step D: Group remaining (non-absorbed) components into islands/archipelagos.
+    // BFS expands through ocean/frozen cells; reaching another remaining component
+    // within ARCH_DIST hops merges it into the current group.
+    let remaining: Vec<usize> = (0..n_comps).filter(|&ii| coast_targets[ii].is_none()).collect();
+    let n_remaining = remaining.len();
+    if n_remaining > 0 {
+        // Map original region ID → index in remaining[].
+        let rid_to_ri: HashMap<u32, usize> = remaining.iter().enumerate()
+            .map(|(ri, &ci)| (island_components[ci].0, ri))
+            .collect();
+
+        let mut group_of: Vec<Option<usize>> = vec![None; n_remaining];
+        let mut groups: Vec<Vec<usize>> = Vec::new();
+
+        for start_ri in 0..n_remaining {
+            if group_of[start_ri].is_some() { continue; }
+            let gid = groups.len();
+            groups.push(vec![start_ri]);
+            group_of[start_ri] = Some(gid);
+
+            let mut visited = vec![false; n];
+            let mut queue: VecDeque<(usize, u8)> = VecDeque::new();
+            for &idx in &island_components[remaining[start_ri]].1 {
+                visited[idx] = true;
+                queue.push_back((idx, 0));
+            }
+
+            while let Some((idx, d)) = queue.pop_front() {
+                let x = idx % width;
+                let y = idx / width;
+                for (nx, ny) in neighbors_4(x, y, width, height) {
+                    let nidx = ny * width + nx;
+                    if visited[nidx] { continue; }
+                    visited[nidx] = true;
+                    if free_land[nidx] {
+                        // free_land is a snapshot: absorbed cells may now have a
+                        // continental region_map entry not in rid_to_ri — skip them.
+                        if let Some(&ri) = rid_to_ri.get(&region_map[nidx]) {
+                            if group_of[ri].is_none() {
+                                group_of[ri] = Some(gid);
+                                groups[gid].push(ri);
+                                for &cidx in &island_components[remaining[ri]].1 {
+                                    if !visited[cidx] {
+                                        visited[cidx] = true;
+                                        queue.push_back((cidx, 0));
+                                    }
+                                }
+                            }
+                        }
+                        continue;
+                    }
+                    let nd = d.saturating_add(1);
+                    if (is_ocean[nidx] || is_glacier[nidx] || is_sea_ice[nidx])
+                        && nd <= ISLAND_ARCH_DIST as u8
+                    {
+                        queue.push_back((nidx, nd));
+                    }
+                }
+            }
+        }
+
+        // Step E: Assign new region IDs for each island group.
+        for group in &groups {
+            let new_rid = region_cells.len() as u32;
+            let n_parts = group.len();
+            let mut all_cells = Vec::new();
+            for &ri in group {
+                let (_, cells) = &island_components[remaining[ri]];
+                for &idx in cells { region_map[idx] = new_rid; }
+                all_cells.extend_from_slice(cells);
+            }
+            region_cells.push(all_cells);
+            region_kind.push(CellKind::Land);
+            island_parts.push(n_parts);
+        }
+    }
+
     // Phase 3: Compact IDs and build Region structs.
     let mut new_id = 0u32;
     let mut id_remap: Vec<u32> = vec![u32::MAX; region_cells.len()];
@@ -1145,20 +1295,21 @@ fn detect_regions(
         .map(|(old_id, cells)| {
             let sf = cells.len() as f64;
             Region {
-                id:           id_remap[old_id],
-                size:         cells.len(),
-                mean_elev:    cells.iter().map(|&i| elevation.data[i]).sum::<f64>()    / sf,
-                mean_temp:    cells.iter().map(|&i| temperature.data[i]).sum::<f64>()  / sf,
-                mean_precip:  cells.iter().map(|&i| precipitation.data[i]).sum::<f64>() / sf,
-                mean_aridity: cells.iter().map(|&i| aridity.data[i]).sum::<f64>()      / sf,
-                ocean_frac:   cells.iter().filter(|&&i| is_ocean[i]).count()   as f64 / sf,
-                glacier_frac: cells.iter().filter(|&&i| is_glacier[i]).count() as f64 / sf,
-                sea_ice_frac: cells.iter().filter(|&&i| is_sea_ice[i]).count() as f64 / sf,
+                id:                id_remap[old_id],
+                size:              cells.len(),
+                mean_elev:         cells.iter().map(|&i| elevation.data[i]).sum::<f64>()     / sf,
+                mean_temp:         cells.iter().map(|&i| temperature.data[i]).sum::<f64>()   / sf,
+                mean_precip:       cells.iter().map(|&i| precipitation.data[i]).sum::<f64>() / sf,
+                mean_aridity:      cells.iter().map(|&i| aridity.data[i]).sum::<f64>()       / sf,
+                ocean_frac:        cells.iter().filter(|&&i| is_ocean[i]).count()    as f64 / sf,
+                glacier_frac:      cells.iter().filter(|&&i| is_glacier[i]).count()  as f64 / sf,
+                sea_ice_frac:      cells.iter().filter(|&&i| is_sea_ice[i]).count()  as f64 / sf,
+                island_components: island_parts[old_id],
             }
         })
         .collect();
 
-    regions.sort_unstable_by(|a, b| b.size.cmp(&a.size));
+    regions.sort_unstable_by_key(|r| r.id);
     (region_map, regions)
 }
 
