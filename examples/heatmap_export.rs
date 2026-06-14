@@ -1,3 +1,4 @@
+use demiurge_rust::universe::{AtmosphereTag, GeoTag, Planet, Star};
 use image::{ImageBuffer, Rgb};
 use noise::{Fbm, NoiseFn, Perlin};
 use std::cmp::Reverse;
@@ -13,27 +14,139 @@ struct HeatMap {
     data: Vec<f64>,
 }
 
-struct HydrologyParams {
-    /// Elevation threshold below which the planet surface is ocean [0, 1].
-    sea_level: f64,
-    /// Maximum fill depth for a lake. Depressions requiring deeper fill are
-    /// treated as endorheic basins (water either runs out or sinks underground).
-    max_lake_fill: f64,
-    /// Fraction of endorheic basin cells that become aquifer recharge zones
-    /// rather than terminal dry sinks. Placeholder until climate/geology data
-    /// can drive this properly.
-    aquifer_probability: f64,
-    /// Minimum upstream cell count for a cell to render as a river.
-    river_threshold: f64,
+struct PlanetParams {
+    seed:                   u32,
+    // Elevation
+    radius:                 f64, // Earth radii; scales feature sizes
+    warp_strength:          f64,
+    // Climate
+    temp_baseline:          f64, // [0,1] equatorial warmth; from insolation + greenhouse
+    temp_gradient:          f64, // how steeply temperature falls pole-ward; 1.0 = maximum
+    lapse_factor:           f64, // elevation cooling rate
+    precip_moisture:        f64, // [0,1] ocean evaporation ceiling; from WaterVapor fraction
+    land_decay:             f64, // moisture loss per land cell
+    slope_threshold:        f64, // min elevation gain to trigger rain shadow
+    slope_loss:             f64, // rain shadow intensity
+    base_arid:              f64, // minimum interior precipitation
+    et_factor:              f64, // evapotranspiration scaling
+    glacier_temp_threshold: f64, // temp below which land glaciates
+    sea_ice_temp_threshold: f64, // temp below which ocean freezes
+    sea_ice_evap_factor:    f64, // ocean evaporation reduction under sea ice
+    // Hydrology
+    sea_level:              f64, // from liquid_coverage
+    max_lake_fill:          f64,
+    aquifer_probability:    f64, // from Carbonate/Icy geo fraction
+    river_threshold:        f64,
+    glacier_melt_factor:    f64,
+    // Region detection
+    land_threshold:         f64,
+    ocean_threshold:        f64,
+    region_min_size:        usize,
+    island_coast_dist:      usize,
+    island_arch_dist:       usize,
 }
 
-impl Default for HydrologyParams {
-    fn default() -> Self {
+impl PlanetParams {
+    /// Earth-analog defaults — exactly reproduces the previous hardcoded behaviour.
+    fn earth_like(seed: u32) -> Self {
         Self {
-            sea_level: 0.5,
-            max_lake_fill: 0.04,
-            aquifer_probability: 0.35,
-            river_threshold: 400.0,
+            seed,
+            radius:                 1.0,
+            warp_strength:          0.2,
+            temp_baseline:          1.0,
+            temp_gradient:          1.0,
+            lapse_factor:           0.3,
+            precip_moisture:        1.0,
+            land_decay:             0.985,
+            slope_threshold:        0.015,
+            slope_loss:             0.5,
+            base_arid:              0.05,
+            et_factor:              0.35,
+            glacier_temp_threshold: 0.20,
+            sea_ice_temp_threshold: 0.14,
+            sea_ice_evap_factor:    0.25,
+            sea_level:              0.5,
+            max_lake_fill:          0.04,
+            aquifer_probability:    0.35,
+            river_threshold:        400.0,
+            glacier_melt_factor:    2.5,
+            land_threshold:         0.15,
+            ocean_threshold:        0.59,
+            region_min_size:        150,
+            island_coast_dist:      3,
+            island_arch_dist:       25,
+        }
+    }
+
+    /// Derive generation parameters from a Planet entity and its host Star.
+    fn from_planet(planet: &Planet, star: &Star) -> Self {
+        // Insolation: luminosity / orbital-distance², normalised so that a
+        // YellowDwarf at 1 AU gives exactly 1.0.
+        let insolation =
+            (star.luminosity as f64 / (planet.coord.x as f64).powi(2)).clamp(0.0, 3.0);
+
+        // Greenhouse contribution from key atmospheric gases.  Fractions are
+        // from the normalised atmo HashMap, so they already sum to ≤ 1.
+        let co2 = *planet.atmo.get(&AtmosphereTag::CarbonDioxide).unwrap_or(&0.0) as f64;
+        let ch4 = *planet.atmo.get(&AtmosphereTag::Methane).unwrap_or(&0.0) as f64;
+        let h2o = *planet.atmo.get(&AtmosphereTag::WaterVapor).unwrap_or(&0.0) as f64;
+        let nh3 = *planet.atmo.get(&AtmosphereTag::Ammonia).unwrap_or(&0.0) as f64;
+        let greenhouse = co2 * 0.5 + ch4 * 0.8 + h2o * 0.2 + nh3 * 0.4;
+
+        // Equatorial surface temperature: insolation shifted up by greenhouse.
+        // Earth (insolation≈1, minimal greenhouse) → temp_baseline ≈ 1.0.
+        let temp_baseline = (insolation + greenhouse).clamp(0.0, 1.0);
+
+        // Axial tilt flattens the equator-to-pole temperature gradient.
+        // tilt=0 → gradient=1.0 (maximum drop), tilt=90 → gradient=0.1.
+        let tilt_norm = (planet.axial_tilt as f64 / 90.0).clamp(0.0, 1.0);
+        let temp_gradient = 0.10 + 0.90 * (1.0 - tilt_norm);
+
+        // Atmospheric moisture: WaterVapor fraction scaled by gravity (higher
+        // gravity retains more atmosphere, supporting richer moisture cycles).
+        let precip_moisture = (h2o * planet.gravity as f64).clamp(0.0, 1.0);
+        let base_arid = (0.20 - precip_moisture * 0.15).max(0.01);
+
+        // Ice thresholds shift with global temperature: colder planets freeze
+        // at proportionally higher temperatures.
+        let glacier_temp_threshold = (0.20 * (1.0 - temp_baseline * 0.5)).clamp(0.05, 0.40);
+        let sea_ice_temp_threshold = glacier_temp_threshold * 0.70;
+
+        // Carbonate and icy crusts favour subsurface water retention.
+        let carbonate = *planet.geo.get(&GeoTag::Carbonate).unwrap_or(&0.0) as f64;
+        let icy       = *planet.geo.get(&GeoTag::Icy).unwrap_or(&0.0) as f64;
+        let aquifer_probability = (0.10 + carbonate * 0.60 + icy * 0.30).clamp(0.0, 1.0);
+
+        // Larger, more volcanically active planets have rougher terrain.
+        let warp_strength =
+            (0.10 + planet.volcanism as f64 * 0.30) * (planet.radius as f64).sqrt();
+
+        Self {
+            seed:                   seed_from_uuid(*planet.id.as_bytes()),
+            radius:                 planet.radius as f64,
+            warp_strength,
+            temp_baseline,
+            temp_gradient,
+            lapse_factor:           0.3,
+            precip_moisture,
+            land_decay:             0.985,
+            slope_threshold:        0.015,
+            slope_loss:             0.5,
+            base_arid,
+            et_factor:              0.35,
+            glacier_temp_threshold,
+            sea_ice_temp_threshold,
+            sea_ice_evap_factor:    0.25,
+            sea_level:              planet.liquid_coverage as f64,
+            max_lake_fill:          0.04,
+            aquifer_probability,
+            river_threshold:        400.0,
+            glacier_melt_factor:    2.5,
+            land_threshold:         0.15,
+            ocean_threshold:        0.59,
+            region_min_size:        150,
+            island_coast_dist:      3,
+            island_arch_dist:       25,
         }
     }
 }
@@ -47,7 +160,7 @@ struct HydrologyResult {
 // ── HeatMap generation ───────────────────────────────────────────────────────
 
 impl HeatMap {
-    fn generate_elevation(width: usize, height: usize, seed: u32) -> Self {
+    fn generate_elevation(width: usize, height: usize, seed: u32, warp_strength: f64) -> Self {
         let fbm = Fbm::<Perlin>::new(seed);
         // Two decorrelated FBM fields warp the sample coordinates before the
         // main noise is read. This breaks up annular saddle features that FBM
@@ -57,7 +170,6 @@ impl HeatMap {
         let warp_a = Fbm::<Perlin>::new(seed.wrapping_add(1));
         let warp_b = Fbm::<Perlin>::new(seed.wrapping_add(2));
         let warp_c = Fbm::<Perlin>::new(seed.wrapping_add(3));
-        const WARP_STRENGTH: f64 = 0.2;
         // Radius so that the equatorial circumference equals 3.5 — preserves
         // feature frequency at the equator. All three FBM fields are sampled at
         // the 3D sphere-surface point, making the noise seamless in both x and y
@@ -75,9 +187,9 @@ impl HeatMap {
                 let sz = r * lat.sin();
 
                 // All three warp fields sampled at sphere-surface coords.
-                let dx = warp_a.get([sx, sy, sz]) * WARP_STRENGTH;
-                let dy = warp_b.get([sx + 5.2, sy + 1.3, sz + 3.7]) * WARP_STRENGTH;
-                let dz = warp_c.get([sx + 2.8, sy + 4.6, sz + 1.9]) * WARP_STRENGTH;
+                let dx = warp_a.get([sx, sy, sz]) * warp_strength;
+                let dy = warp_b.get([sx + 5.2, sy + 1.3, sz + 3.7]) * warp_strength;
+                let dz = warp_c.get([sx + 2.8, sy + 4.6, sz + 1.9]) * warp_strength;
                 data.push(fbm.get([sx + dx, sy + dy, sz + dz]));
             }
         }
@@ -155,19 +267,23 @@ impl HeatMap {
         }
     }
 
-    /// Latitude cosine + elevation lapse rate. No ocean moderation yet.
-    fn generate_temperature(elevation: &HeatMap) -> HeatMap {
-        let width = elevation.width;
+    /// Latitude cosine + elevation lapse rate, scaled by planet params.
+    ///
+    /// `temp_baseline` sets the equatorial surface temperature [0,1]; `temp_gradient`
+    /// controls how steeply it drops toward the poles (1.0 = full drop to 0, 0.1 = nearly flat).
+    fn generate_temperature(elevation: &HeatMap, params: &PlanetParams) -> HeatMap {
+        let width  = elevation.width;
         let height = elevation.height;
-        const LAPSE_FACTOR: f64 = 0.3;
 
         let data = (0..width * height)
             .map(|idx| {
                 let y = idx / width;
                 let abs_lat =
                     (y as f64 - height as f64 / 2.0).abs() / (height as f64 / 2.0);
-                let lat_base = (abs_lat * std::f64::consts::FRAC_PI_2).cos();
-                (lat_base - elevation.data[idx] * LAPSE_FACTOR).clamp(0.0, 1.0)
+                let lat_shape = (abs_lat * std::f64::consts::FRAC_PI_2).cos();
+                let lat_temp  =
+                    params.temp_baseline * (1.0 - params.temp_gradient * (1.0 - lat_shape));
+                (lat_temp - elevation.data[idx] * params.lapse_factor).clamp(0.0, 1.0)
             })
             .collect();
 
@@ -181,19 +297,10 @@ impl HeatMap {
     /// westerly weight. The double-pass handles the east-west seam: carry from
     /// the end of each row's first pass seeds the second pass, so moisture
     /// wraps around the globe correctly.
-    fn generate_precipitation(elevation: &HeatMap, is_ocean: &[bool], temperature: &HeatMap, is_sea_ice: &[bool]) -> HeatMap {
+    fn generate_precipitation(elevation: &HeatMap, is_ocean: &[bool], temperature: &HeatMap, is_sea_ice: &[bool], params: &PlanetParams) -> HeatMap {
         let width = elevation.width;
         let height = elevation.height;
         let n = width * height;
-
-        // Per land-cell moisture decay and rain-shadow factor.
-        const LAND_DECAY: f64 = 0.985;
-        // Only count elevation gain above this floor as a rain shadow — small
-        // FBM noise between adjacent cells should not strip moisture.
-        const SLOPE_THRESHOLD: f64 = 0.015;
-        const SLOPE_LOSS: f64 = 0.5;
-        // Minimum precipitation from local convection; keeps interiors non-zero.
-        const BASE_ARID: f64 = 0.05;
 
         let mut moisture_west = vec![0.0f64; n];
         let mut moisture_east = vec![0.0f64; n];
@@ -208,13 +315,13 @@ impl HeatMap {
                 let idx = y * width + x;
                 if is_ocean[idx] {
                     // Sea ice dramatically reduces evaporation; open ocean = full moisture.
-                    carry = if is_sea_ice[idx] { SEA_ICE_EVAP_FACTOR } else { 1.0 };
+                    carry = if is_sea_ice[idx] { params.sea_ice_evap_factor } else { params.precip_moisture };
                 } else {
                     let upwind_x = (x + width - 1) % width;
                     let raw_gain =
                         elevation.data[idx] - elevation.data[y * width + upwind_x];
-                    let elev_gain = (raw_gain - SLOPE_THRESHOLD).max(0.0);
-                    carry = (carry * LAND_DECAY - elev_gain * SLOPE_LOSS).max(0.0);
+                    let elev_gain = (raw_gain - params.slope_threshold).max(0.0);
+                    carry = (carry * params.land_decay - elev_gain * params.slope_loss).max(0.0);
                 }
                 if pass_x >= width {
                     moisture_west[idx] = carry;
@@ -231,13 +338,13 @@ impl HeatMap {
                 let x = (width - 1) - (pass_i % width);
                 let idx = y * width + x;
                 if is_ocean[idx] {
-                    carry = if is_sea_ice[idx] { SEA_ICE_EVAP_FACTOR } else { 1.0 };
+                    carry = if is_sea_ice[idx] { params.sea_ice_evap_factor } else { params.precip_moisture };
                 } else {
                     let upwind_x = (x + 1) % width;
                     let raw_gain =
                         elevation.data[idx] - elevation.data[y * width + upwind_x];
-                    let elev_gain = (raw_gain - SLOPE_THRESHOLD).max(0.0);
-                    carry = (carry * LAND_DECAY - elev_gain * SLOPE_LOSS).max(0.0);
+                    let elev_gain = (raw_gain - params.slope_threshold).max(0.0);
+                    carry = (carry * params.land_decay - elev_gain * params.slope_loss).max(0.0);
                 }
                 if pass_i >= width {
                     moisture_east[idx] = carry;
@@ -257,7 +364,7 @@ impl HeatMap {
                 let moisture = moisture_west[idx] * w + moisture_east[idx] * (1.0 - w);
                 let band = lat_band_factor(abs_lat);
                 let moisture_capacity = (0.3 + 0.7 * temperature.data[idx]).clamp(0.3, 1.0);
-                (band * (BASE_ARID + moisture * (1.0 - BASE_ARID)) * moisture_capacity).clamp(0.0, 1.0)
+                (band * (params.base_arid + moisture * (1.0 - params.base_arid)) * moisture_capacity).clamp(0.0, 1.0)
             })
             .collect();
 
@@ -269,7 +376,7 @@ impl HeatMap {
         is_ocean: &[bool],
         precipitation: &HeatMap,
         is_glacier: &[bool],
-        params: &HydrologyParams,
+        params: &PlanetParams,
     ) -> HydrologyResult {
         let width = elevation.width;
         let height = elevation.height;
@@ -487,12 +594,11 @@ impl HeatMap {
         };
         // Glacier cells contribute extra flow representing meltwater. The bonus
         // is multiplicative so high-precip glaciers (wet snowfields) feed larger rivers.
-        const GLACIER_MELT_FACTOR: f64 = 2.5;
         let mut accumulation: Vec<f64> = (0..n)
             .map(|i| {
                 if is_ocean[i] { return 0.0; }
                 let base = precipitation.data[i] / mean_land_precip;
-                if is_glacier[i] { base * GLACIER_MELT_FACTOR } else { base }
+                if is_glacier[i] { base * params.glacier_melt_factor } else { base }
             })
             .collect();
         for &idx in &land_order {
@@ -563,10 +669,9 @@ impl HeatMap {
     /// Effective moisture: precipitation minus potential evapotranspiration (which
     /// scales with temperature). Maps to [0, 1] where 0 = maximally arid and 1 =
     /// maximally humid. Used for biome classification and region detection.
-    fn generate_aridity(temperature: &HeatMap, precipitation: &HeatMap) -> HeatMap {
-        const ET_FACTOR: f64 = 0.35;
+    fn generate_aridity(temperature: &HeatMap, precipitation: &HeatMap, et_factor: f64) -> HeatMap {
         let data = temperature.data.iter().zip(precipitation.data.iter())
-            .map(|(&t, &p)| ((p - t * ET_FACTOR + ET_FACTOR) / (1.0 + ET_FACTOR)).clamp(0.0, 1.0))
+            .map(|(&t, &p)| ((p - t * et_factor + et_factor) / (1.0 + et_factor)).clamp(0.0, 1.0))
             .collect();
         HeatMap { width: temperature.width, height: temperature.height, data }
     }
@@ -659,31 +764,17 @@ fn westerly_weight(abs_lat: f64) -> f64 {
     stops.last().unwrap().1
 }
 
-/// Land cells whose temperature falls below this threshold are classified as
-/// glaciated. Captures polar ice sheets and high-altitude snowfields.
-/// Tune upward for more glaciation, downward for less.
-const GLACIER_TEMP_THRESHOLD: f64 = 0.20;
-
 /// Returns a bool mask: true where a land cell is glaciated.
-fn generate_glacier(temperature: &HeatMap, is_ocean: &[bool]) -> Vec<bool> {
+fn generate_glacier(temperature: &HeatMap, is_ocean: &[bool], threshold: f64) -> Vec<bool> {
     (0..temperature.data.len())
-        .map(|i| !is_ocean[i] && temperature.data[i] < GLACIER_TEMP_THRESHOLD)
+        .map(|i| !is_ocean[i] && temperature.data[i] < threshold)
         .collect()
 }
 
-/// Ocean cells below this temperature are frozen over as sea ice.
-/// Slightly lower than GLACIER_TEMP_THRESHOLD — open ocean stays liquid a bit
-/// longer than land surfaces due to its heat capacity.
-const SEA_ICE_TEMP_THRESHOLD: f64 = 0.14;
-
-/// Fraction of normal ocean evaporation that sea ice permits.
-/// Ice-covered ocean contributes much less moisture to the atmosphere.
-const SEA_ICE_EVAP_FACTOR: f64 = 0.25;
-
-/// Returns a bool mask: true where an ocean cell is frozen.
-fn generate_sea_ice(temperature: &HeatMap, is_ocean: &[bool]) -> Vec<bool> {
+/// Returns a bool mask: true where an ocean cell is frozen over as sea ice.
+fn generate_sea_ice(temperature: &HeatMap, is_ocean: &[bool], threshold: f64) -> Vec<bool> {
     (0..temperature.data.len())
-        .map(|i| is_ocean[i] && temperature.data[i] < SEA_ICE_TEMP_THRESHOLD)
+        .map(|i| is_ocean[i] && temperature.data[i] < threshold)
         .collect()
 }
 
@@ -792,8 +883,8 @@ fn precipitation_color(t: f64) -> [u8; 3] {
 
 /// Sea ice color: flat white-grey, slightly more grey than land glacier to read
 /// as a different surface. Dithers to ocean at its warm edge.
-fn sea_ice_color(t: f64) -> [u8; 3] {
-    let normalized = (t / SEA_ICE_TEMP_THRESHOLD).clamp(0.0, 1.0);
+fn sea_ice_color(t: f64, threshold: f64) -> [u8; 3] {
+    let normalized = (t / threshold).clamp(0.0, 1.0);
     sample_gradient(
         normalized,
         &[
@@ -806,8 +897,8 @@ fn sea_ice_color(t: f64) -> [u8; 3] {
 
 /// Glacier/ice color: pure white at coldest, pale blue at the warmer threshold edge.
 /// t is the normalized temperature within the glaciated range [0, GLACIER_TEMP_THRESHOLD].
-fn glacier_color(t: f64) -> [u8; 3] {
-    let normalized = (t / GLACIER_TEMP_THRESHOLD).clamp(0.0, 1.0);
+fn glacier_color(t: f64, threshold: f64) -> [u8; 3] {
+    let normalized = (t / threshold).clamp(0.0, 1.0);
     sample_gradient(
         normalized,
         &[
@@ -1062,6 +1153,8 @@ fn detect_regions(
     land_threshold:  f64,
     ocean_threshold: f64,
     min_size:        usize,
+    coast_dist:      usize,
+    arch_dist:       usize,
 ) -> (Vec<u32>, Vec<Region>) {
     let width  = elevation.width;
     let height = elevation.height;
@@ -1144,8 +1237,8 @@ fn detect_regions(
     // Land cells discarded by min_size merging are either absorbed into a nearby
     // continental region (within COAST_DIST ocean hops) or grouped into standalone
     // island / archipelago regions via ocean BFS (within ARCH_DIST ocean hops).
-    const ISLAND_COAST_DIST: usize = 3;
-    const ISLAND_ARCH_DIST:  usize = 25;
+    let island_coast_dist = coast_dist;
+    let island_arch_dist  = arch_dist;
 
     // Per-region island-component count (0 = continental).  New island regions are
     // appended to region_cells below; their counts are pushed in lock-step.
@@ -1186,7 +1279,7 @@ fn detect_regions(
                 }
                 let nd = dist[idx].saturating_add(1);
                 if (is_ocean[nidx] || is_glacier[nidx] || is_sea_ice[nidx])
-                    && nd <= ISLAND_COAST_DIST as u8
+                    && nd <= island_coast_dist as u8
                 {
                     dist[nidx] = nd;
                     queue.push_back(nidx);
@@ -1256,7 +1349,7 @@ fn detect_regions(
                     }
                     let nd = d.saturating_add(1);
                     if (is_ocean[nidx] || is_glacier[nidx] || is_sea_ice[nidx])
-                        && nd <= ISLAND_ARCH_DIST as u8
+                        && nd <= island_arch_dist as u8
                     {
                         queue.push_back((nidx, nd));
                     }
@@ -1393,10 +1486,10 @@ fn main() {
     let render_width = width * RENDER_SCALE;
     let render_height = height * RENDER_SCALE;
 
-    let params = HydrologyParams::default();
+    let params = PlanetParams::earth_like(seed);
 
     println!("Generating {}x{} elevation map (seed {})...", width, height, seed);
-    let mut elevation = HeatMap::generate_elevation(width, height, seed);
+    let mut elevation = HeatMap::generate_elevation(width, height, seed, params.warp_strength);
     elevation.roughen_coastline(params.sea_level, seed.wrapping_add(10));
 
     let elev_img = ImageBuffer::from_fn(width as u32, height as u32, |x, y| {
@@ -1419,11 +1512,11 @@ fn main() {
     let is_ocean = flood_fill_ocean(&elevation.data, width, height, params.sea_level);
 
     println!("Generating climate...");
-    let temperature = HeatMap::generate_temperature(&elevation);
-    let is_sea_ice = generate_sea_ice(&temperature, &is_ocean);
-    let precipitation = HeatMap::generate_precipitation(&elevation, &is_ocean, &temperature, &is_sea_ice);
-    let is_glacier = generate_glacier(&temperature, &is_ocean);
-    let aridity = HeatMap::generate_aridity(&temperature, &precipitation);
+    let temperature   = HeatMap::generate_temperature(&elevation, &params);
+    let is_sea_ice    = generate_sea_ice(&temperature, &is_ocean, params.sea_ice_temp_threshold);
+    let precipitation = HeatMap::generate_precipitation(&elevation, &is_ocean, &temperature, &is_sea_ice, &params);
+    let is_glacier    = generate_glacier(&temperature, &is_ocean, params.glacier_temp_threshold);
+    let aridity       = HeatMap::generate_aridity(&temperature, &precipitation, params.et_factor);
 
     let temp_img = ImageBuffer::from_fn(width as u32, height as u32, |x, y| {
         let nx = x as f64 / width as f64;
@@ -1454,7 +1547,7 @@ fn main() {
         let nx = x as f64 / width as f64;
         let ny = y as f64 / height as f64;
         if is_glacier[idx] {
-            Rgb(glacier_color(temperature.sample(nx, ny)))
+            Rgb(glacier_color(temperature.sample(nx, ny), params.glacier_temp_threshold))
         } else {
             Rgb([0u8, 0, 0])
         }
@@ -1467,7 +1560,7 @@ fn main() {
         let nx = x as f64 / width as f64;
         let ny = y as f64 / height as f64;
         if is_sea_ice[idx] {
-            Rgb(sea_ice_color(temperature.sample(nx, ny)))
+            Rgb(sea_ice_color(temperature.sample(nx, ny), params.sea_ice_temp_threshold))
         } else {
             Rgb([0u8, 0, 0])
         }
@@ -1553,8 +1646,8 @@ fn main() {
             if off_y == 2 && !sea_ice_neighbor(dx as i64, dy as i64 + 1) { coverage = SEA_ICE_EDGE; }
             if BAYER_4X4[ry as usize % 4][rx as usize % 4] < coverage {
                 let t = temperature.sample(nx, ny);
-                let d = bayer_dither(t / SEA_ICE_TEMP_THRESHOLD, rx as usize, ry as usize, N_DITHER_LEVELS);
-                sea_ice_color(d)
+                let d = bayer_dither(t / params.sea_ice_temp_threshold, rx as usize, ry as usize, N_DITHER_LEVELS);
+                sea_ice_color(d, params.sea_ice_temp_threshold)
             } else {
                 let d = bayer_dither(hydro_nearest, rx as usize, ry as usize, N_DITHER_LEVELS).max(0.01);
                 water_color(d)
@@ -1578,8 +1671,8 @@ fn main() {
             if off_y == 2 && non_glacier_land(dx as i64, dy as i64 + 1) { coverage = GLACIER_EDGE; }
             if BAYER_4X4[ry as usize % 4][rx as usize % 4] < coverage {
                 let t = temperature.sample(nx, ny);
-                let d = bayer_dither(t / GLACIER_TEMP_THRESHOLD, rx as usize, ry as usize, N_DITHER_LEVELS);
-                glacier_color(d)
+                let d = bayer_dither(t / params.glacier_temp_threshold, rx as usize, ry as usize, N_DITHER_LEVELS);
+                glacier_color(d, params.glacier_temp_threshold)
             } else {
                 let elev_t = elevation.sample(nx, ny);
                 let land_t = ((elev_t - params.sea_level) / (1.0 - params.sea_level)).clamp(0.0, 1.0);
@@ -1611,16 +1704,15 @@ fn main() {
     println!("Saved composite.png");
 
     // ── Region detection ─────────────────────────────────────────────────────
-    const LAND_THRESHOLD:  f64   = 0.15;
-    const OCEAN_THRESHOLD: f64   = 0.59;
-    const REGION_MIN_SIZE: usize = 150;
     println!(
-        "Detecting regions (land_thr={LAND_THRESHOLD}, ocean_thr={OCEAN_THRESHOLD}, min_size={REGION_MIN_SIZE})..."
+        "Detecting regions (land_thr={}, ocean_thr={}, min_size={})...",
+        params.land_threshold, params.ocean_threshold, params.region_min_size,
     );
     let (region_map, regions) = detect_regions(
         &elevation, &temperature, &precipitation, &aridity,
         &is_ocean, &is_glacier, &is_sea_ice,
-        LAND_THRESHOLD, OCEAN_THRESHOLD, REGION_MIN_SIZE,
+        params.land_threshold, params.ocean_threshold, params.region_min_size,
+        params.island_coast_dist, params.island_arch_dist,
     );
 
     let total_cells = (width * height) as f64;

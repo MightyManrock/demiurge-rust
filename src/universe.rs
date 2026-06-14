@@ -146,6 +146,7 @@ pub struct Planet {
     pub parent_id: Option<Uuid>,
     pub child_ids: Option<Vec<Uuid>>,
     pub coord: CosmicCoordinates,
+    pub radius: f32,
     pub gravity: f32,
     pub axial_tilt: f32,
     pub atmo: HashMap<AtmosphereTag, f32>,
