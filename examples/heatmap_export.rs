@@ -1398,7 +1398,7 @@ fn main() {
 
     // ── Region detection ─────────────────────────────────────────────────────
     const LAND_THRESHOLD:  f64   = 0.25;
-    const OCEAN_THRESHOLD: f64   = 0.55;
+    const OCEAN_THRESHOLD: f64   = 0.59;
     const REGION_MIN_SIZE: usize = 400;
     println!(
         "Detecting regions (land_thr={LAND_THRESHOLD}, ocean_thr={OCEAN_THRESHOLD}, min_size={REGION_MIN_SIZE})..."
