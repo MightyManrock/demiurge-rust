@@ -49,6 +49,8 @@ struct PlanetParams {
     island_coast_dist:      usize,
     island_arch_dist:       usize,
     lon_weight:             f64,   // how much east-west spread from seed costs; 0 = no limit
+    // Salt flats
+    salt_flat_probability:  f64,   // from Crystalline geo fraction; raises aridity threshold for salt flat formation
 }
 
 impl PlanetParams {
@@ -81,6 +83,7 @@ impl PlanetParams {
             island_coast_dist:      3,
             island_arch_dist:       25,
             lon_weight:             0.82,
+            salt_flat_probability:  0.15,
         }
     }
 
@@ -127,6 +130,12 @@ impl PlanetParams {
         let warp_strength =
             (0.10 + planet.volcanism as f64 * 0.30) * (planet.radius as f64).sqrt();
 
+        // Crystalline geology (evaporites, halite) makes endorheic basins prone to
+        // salt flat formation even at moderate aridity. Factor of 1.5 so Crystalline=0.67
+        // saturates; typical rocky planets with trace crystalline (~0.1) get ~0.15.
+        let crystalline = *planet.geo.get(&GeoTag::Crystalline).unwrap_or(&0.0) as f64;
+        let salt_flat_probability = (crystalline * 1.5).clamp(0.0, 1.0);
+
         Self {
             seed:                   seed_from_uuid(*planet.id.as_bytes()),
             radius:                 planet.radius as f64,
@@ -154,6 +163,7 @@ impl PlanetParams {
             island_coast_dist:      3,
             island_arch_dist:       25,
             lon_weight:             0.82,
+            salt_flat_probability,
         }
     }
 }
@@ -162,6 +172,8 @@ struct HydrologyResult {
     map: HeatMap,
     /// Cells where rivers sink underground rather than running dry.
     aquifer_zones: Vec<(usize, usize)>,
+    /// Endorheic basin cells: water accumulates here but never reaches the ocean.
+    is_endorheic: Vec<bool>,
 }
 
 // ── HeatMap generation ───────────────────────────────────────────────────────
@@ -670,6 +682,7 @@ impl HeatMap {
         HydrologyResult {
             map: HeatMap { width, height, data },
             aquifer_zones,
+            is_endorheic: endorheic,
         }
     }
 
@@ -916,6 +929,20 @@ fn glacier_color(t: f64, threshold: f64) -> [u8; 3] {
     )
 }
 
+/// Salt flat color: brilliant white at hyperarid core, pale mineral-yellow toward edges.
+/// t is aridity [0,1]; salt flats only exist at low aridity, so the range used is [0, 0.4].
+fn salt_flat_color(aridity: f64) -> [u8; 3] {
+    sample_gradient(
+        aridity.clamp(0.0, 0.4),
+        &[
+            ([255, 254, 250], 0.00), // hyperarid core — brilliant white
+            ([248, 244, 232], 0.15), // pale mineral cast
+            ([238, 232, 210], 0.30), // salt-crust edge, slight yellow-tan
+            ([225, 218, 190], 0.40), // transitional margin
+        ],
+    )
+}
+
 /// Effective moisture gradient: orange-tan (arid) → pale green → teal (humid).
 fn aridity_color(t: f64) -> [u8; 3] {
     sample_gradient(
@@ -1075,6 +1102,7 @@ struct Region {
     ocean_frac:        f64,
     glacier_frac:      f64,
     sea_ice_frac:      f64,
+    salt_flat_frac:    f64,
     island_components: usize, // 0 = continental, 1 = island, >1 = archipelago
 }
 
@@ -1082,6 +1110,7 @@ impl Region {
     fn climate_character(&self) -> &'static str {
         if self.sea_ice_frac > 0.5   { return "Sea Ice"; }
         if self.glacier_frac > 0.5   { return "Glacier / Ice Sheet"; }
+        if self.salt_flat_frac > 0.5 { return "Salt Flats"; }
         if self.ocean_frac > 0.5 {
             if self.mean_temp < 0.20 { return "Polar Ocean"; }
             if self.mean_temp < 0.50 { return "Cold Ocean"; }
@@ -1157,6 +1186,7 @@ fn detect_regions(
     is_ocean:        &[bool],
     is_glacier:      &[bool],
     is_sea_ice:      &[bool],
+    is_salt_flat:    &[bool],
     land_threshold:  f64,
     ocean_threshold: f64,
     min_size:        usize,
@@ -1411,9 +1441,10 @@ fn detect_regions(
                 mean_temp:         cells.iter().map(|&i| temperature.data[i]).sum::<f64>()   / sf,
                 mean_precip:       cells.iter().map(|&i| precipitation.data[i]).sum::<f64>() / sf,
                 mean_aridity:      cells.iter().map(|&i| aridity.data[i]).sum::<f64>()       / sf,
-                ocean_frac:        cells.iter().filter(|&&i| is_ocean[i]).count()    as f64 / sf,
-                glacier_frac:      cells.iter().filter(|&&i| is_glacier[i]).count()  as f64 / sf,
-                sea_ice_frac:      cells.iter().filter(|&&i| is_sea_ice[i]).count()  as f64 / sf,
+                ocean_frac:        cells.iter().filter(|&&i| is_ocean[i]).count()     as f64 / sf,
+                glacier_frac:      cells.iter().filter(|&&i| is_glacier[i]).count()   as f64 / sf,
+                sea_ice_frac:      cells.iter().filter(|&&i| is_sea_ice[i]).count()   as f64 / sf,
+                salt_flat_frac:    cells.iter().filter(|&&i| is_salt_flat[i]).count() as f64 / sf,
                 island_components: island_parts[old_id],
             }
         })
@@ -1645,6 +1676,19 @@ fn main() {
         result.aquifer_zones.len()
     );
 
+    // Salt flats: endorheic basin floors that are arid enough and geologically
+    // crystalline. salt_flat_probability raises the aridity threshold — higher
+    // Crystalline fraction means more evaporite basins qualify.
+    let salt_flat_aridity_threshold = 0.35 + params.salt_flat_probability * 0.25;
+    let is_salt_flat: Vec<bool> = (0..width * height).map(|i| {
+        result.is_endorheic[i]
+            && !is_ocean[i]
+            && !is_glacier[i]
+            && aridity.data[i] < salt_flat_aridity_threshold
+    }).collect();
+    let n_salt_flat = is_salt_flat.iter().filter(|&&b| b).count();
+    println!("  {} salt flat cells (aridity_thr={:.3})", n_salt_flat, salt_flat_aridity_threshold);
+
     // Raw hydrology: black for dry land, water gradient for wet cells.
     let hydro_img = ImageBuffer::from_fn(width as u32, height as u32, |x, y| {
         let nx = x as f64 / width as f64;
@@ -1749,6 +1793,10 @@ fn main() {
                 let d = bayer_dither(land_t, rx as usize, ry as usize, N_DITHER_LEVELS);
                 terrain_color(d)
             }
+        } else if is_salt_flat[data_idx] {
+            let arid = aridity.sample(nx, ny);
+            let d = bayer_dither(arid, rx as usize, ry as usize, N_DITHER_LEVELS);
+            salt_flat_color(d)
         } else {
             let t = elevation.sample(nx, ny);
             let land_t = ((t - params.sea_level) / (1.0 - params.sea_level)).clamp(0.0, 1.0);
@@ -1780,7 +1828,7 @@ fn main() {
     );
     let (region_map, regions) = detect_regions(
         &elevation, &temperature, &precipitation, &aridity,
-        &is_ocean, &is_glacier, &is_sea_ice,
+        &is_ocean, &is_glacier, &is_sea_ice, &is_salt_flat,
         params.land_threshold, params.ocean_threshold, params.region_min_size,
         params.island_coast_dist, params.island_arch_dist,
         params.lon_weight,
