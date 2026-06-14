@@ -1460,9 +1460,9 @@ fn main() {
     println!("Saved composite.png");
 
     // ── Region detection ─────────────────────────────────────────────────────
-    const LAND_THRESHOLD:  f64   = 0.25;
+    const LAND_THRESHOLD:  f64   = 0.15;
     const OCEAN_THRESHOLD: f64   = 0.59;
-    const REGION_MIN_SIZE: usize = 400;
+    const REGION_MIN_SIZE: usize = 150;
     println!(
         "Detecting regions (land_thr={LAND_THRESHOLD}, ocean_thr={OCEAN_THRESHOLD}, min_size={REGION_MIN_SIZE})..."
     );
