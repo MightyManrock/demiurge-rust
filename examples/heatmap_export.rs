@@ -964,6 +964,24 @@ fn salt_flat_color(aridity: f64) -> [u8; 3] {
     )
 }
 
+/// Habitability gradient: dark gray (0%) → red → yellow (50%) → green → gold (100%).
+fn habitability_color(t: f64) -> [u8; 3] {
+    if t <= 0.0 {
+        return [45, 45, 45];
+    }
+    if t >= 1.0 {
+        return [255, 215, 0]; // gold
+    }
+    sample_gradient(
+        t,
+        &[
+            ([200, 20, 20],  0.00), // red near 0%
+            ([255, 210, 0],  0.50), // yellow at 50%
+            ([30, 160, 40],  1.00), // green approaching 100%
+        ],
+    )
+}
+
 /// Effective moisture gradient: orange-tan (arid) → pale green → teal (humid).
 fn aridity_color(t: f64) -> [u8; 3] {
     sample_gradient(
@@ -1645,6 +1663,52 @@ fn score_region_for_species(species: &Species, region: &Region, params: &PlanetP
     atmo * grav * press * temp * humidity * solvent
 }
 
+fn score_cell_for_species(
+    species: &Species,
+    elev: f64,
+    temp: f64,
+    precip: f64,
+    aridity: f64,
+    is_ocean_cell: bool,
+    params: &PlanetParams,
+) -> f64 {
+    let atmo = atmo_score(&species.atmo_aff, &params.atmo);
+    if atmo == 0.0 { return 0.0; }
+
+    let grav = match &species.grav_range {
+        Some(r) => range_score(params.gravity, r),
+        None => 1.0,
+    };
+
+    let land_elev = if is_ocean_cell { 0.0 } else {
+        ((elev - params.sea_level) / (1.0 - params.sea_level)).clamp(0.0, 1.0)
+    };
+    let pressure = params.base_press * (-land_elev * 0.8 * params.gravity).exp();
+    let press = match &species.press_range {
+        Some(r) => range_score(pressure, r),
+        None => 1.0,
+    };
+
+    let temp_c = normalized_temp_to_celsius(temp);
+    let temp_s = match &species.temp_range {
+        Some(r) => range_score(temp_c, r),
+        None => 1.0,
+    };
+
+    let humidity = match &species.solvent.humidity_range {
+        Some(r) => range_score(precip, r),
+        None => 1.0,
+    };
+
+    let solvent_val = if is_ocean_cell { 0.0 } else { 1.0 - aridity };
+    let solvent = match &species.solvent.access_range {
+        Some(r) => range_score(solvent_val, r),
+        None => 1.0,
+    };
+
+    atmo * grav * press * temp_s * humidity * solvent
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 fn main() {
@@ -2112,6 +2176,29 @@ fn main() {
             );
         }
         println!("{}", "─".repeat(75));
+
+        // Per-cell habitability heatmap at 3× with Bayer dithering.
+        let suit_cells: Vec<f64> = (0..width * height).map(|i| {
+            score_cell_for_species(
+                species,
+                elevation.data[i],
+                temperature.data[i],
+                precipitation.data[i],
+                aridity.data[i],
+                is_ocean[i],
+                &params,
+            )
+        }).collect();
+        let suit_img = ImageBuffer::from_fn(render_width as u32, render_height as u32, |rx, ry| {
+            let dx = rx as usize / RENDER_SCALE;
+            let dy = ry as usize / RENDER_SCALE;
+            let raw = suit_cells[dy * width + dx];
+            let d = bayer_dither(raw, rx as usize, ry as usize, N_DITHER_LEVELS);
+            Rgb(habitability_color(d))
+        });
+        let fname = format!("habitability_{}.png", sp_name.to_lowercase());
+        suit_img.save(&fname).unwrap_or_else(|_| panic!("failed to save {}", fname));
+        println!("Saved {}", fname);
     }
     println!();
 
