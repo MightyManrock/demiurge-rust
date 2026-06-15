@@ -13,6 +13,7 @@ use image::{ImageBuffer, Rgb};
 use noise::{Fbm, NoiseFn, Perlin};
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, VecDeque};
+use std::f64::consts::PI;
 
 // ── Data structures ──────────────────────────────────────────────────────────
 
@@ -61,6 +62,10 @@ struct PlanetParams {
     lon_weight:             f64,   // how much east-west spread from seed costs; 0 = no limit
     // Salt flats
     salt_flat_probability:  f64,   // from Crystalline geo fraction; raises aridity threshold for salt flat formation
+    // Orbital mechanics
+    axial_tilt:             f64,   // degrees; drives ITCZ migration amplitude
+    orbital_period:         f64,   // standard days per planetary year; used for season_phase
+    rotation_period:        f64,   // standard days per planetary day (informational for now)
 }
 
 impl PlanetParams {
@@ -102,6 +107,9 @@ impl PlanetParams {
             island_arch_dist:       25,
             lon_weight:             0.82,
             salt_flat_probability:  0.15,
+            axial_tilt:             23.5,
+            orbital_period:         365.25,
+            rotation_period:        1.0,
         }
     }
 
@@ -185,6 +193,9 @@ impl PlanetParams {
             island_arch_dist:       25,
             lon_weight:             0.82,
             salt_flat_probability,
+            axial_tilt:             planet.axial_tilt as f64,
+            orbital_period:         planet.orbital_period as f64,
+            rotation_period:        planet.rotation_period as f64,
         }
     }
 }
@@ -195,6 +206,168 @@ struct HydrologyResult {
     aquifer_zones: Vec<(usize, usize)>,
     /// Endorheic basin cells: water accumulates here but never reaches the ocean.
     is_endorheic: Vec<bool>,
+    /// D8 flow direction: each land cell's downstream neighbour index.
+    flow_to: Vec<Option<usize>>,
+    /// Land cells sorted highest-elevation-first (topological upstream→downstream order).
+    topo_order: Vec<usize>,
+    /// Per-cell flow accumulation (precipitation-weighted, normalised by mean land precip).
+    accumulation: Vec<f64>,
+}
+
+// ── Seasonal hydrology ───────────────────────────────────────────────────────
+
+/// Seasonal precipitation cycle for one map cell, encoded as a Fourier phasor.
+/// Evaluate at season angle θ: `base + amp_x * cos(θ) + amp_y * sin(θ)`.
+/// The phasor vector (amp_x, amp_y) encodes both swing magnitude and peak timing:
+///   amplitude  = sqrt(amp_x² + amp_y²)
+///   peak_phase = atan2(amp_y, amp_x)
+struct PrecipPhasor {
+    base:  f32,
+    amp_x: f32,
+    amp_y: f32,
+}
+
+/// Full seasonal hydrology output for a planet.
+struct SeasonalHydro {
+    /// Per-cell rainfall phasor (Layer A — derived from 4-pass precipitation model).
+    rainfall: Vec<PrecipPhasor>,
+    /// Per-cell snowmelt additive amplitude (Layer B — analytically classified).
+    /// Zero for non-snowpack cells. Peaks at `snowmelt_peak`.
+    snowmelt_amp: Vec<f32>,
+    /// Season angle (radians) at which snowmelt peaks; ~3π/2 = northern spring.
+    snowmelt_peak: f32,
+    /// Per-cell flow-accumulated phasor: the rainfall+snowmelt signal propagated
+    /// downstream through the D8 flow graph weighted by accumulation.
+    flow_phasor: Vec<PrecipPhasor>,
+}
+
+/// Evaluate a PrecipPhasor at a given season angle.
+fn sample_precip_phasor(p: &PrecipPhasor, season_phase: f64) -> f32 {
+    (p.base + p.amp_x * season_phase.cos() as f32 + p.amp_y * season_phase.sin() as f32).max(0.0)
+}
+
+/// Run `generate_precipitation` at four quarterly season phases and fit a per-cell
+/// phasor via the 4-point DFT fundamental component.
+///
+/// Season convention: phase 0 = northern summer (ITCZ shifted north).
+///   s0 = summer (0),  s1 = autumn (π/2),  s2 = winter (π),  s3 = spring (3π/2)
+///   base  = (s0+s1+s2+s3) / 4
+///   amp_x = (s0-s2) / 2        (cosine component)
+///   amp_y = (s3-s1) / 2        (sine component)
+fn generate_seasonal_precip(
+    elevation: &HeatMap,
+    is_ocean: &[bool],
+    temperature: &HeatMap,
+    is_sea_ice: &[bool],
+    params: &PlanetParams,
+) -> Vec<PrecipPhasor> {
+    let phases = [0.0, PI / 2.0, PI, 3.0 * PI / 2.0];
+    let maps: Vec<Vec<f64>> = phases
+        .iter()
+        .map(|&ph| {
+            HeatMap::generate_precipitation(elevation, is_ocean, temperature, is_sea_ice, params, ph).data
+        })
+        .collect();
+    let n = elevation.data.len();
+    (0..n)
+        .map(|i| {
+            let s0 = maps[0][i];
+            let s1 = maps[1][i];
+            let s2 = maps[2][i];
+            let s3 = maps[3][i];
+            PrecipPhasor {
+                base:  ((s0 + s1 + s2 + s3) / 4.0) as f32,
+                amp_x: ((s0 - s2) / 2.0) as f32,
+                amp_y: ((s3 - s1) / 2.0) as f32,
+            }
+        })
+        .collect()
+}
+
+/// Classify cells with seasonal snowpack (freeze in winter, melt in spring).
+/// Returns per-cell snowmelt amplitude: the precipitation that accumulates as
+/// snow and releases in spring, approximated from the winter precipitation value.
+fn classify_snowpack(
+    temperature: &HeatMap,
+    is_ocean: &[bool],
+    rainfall: &[PrecipPhasor],
+    params: &PlanetParams,
+) -> Vec<f32> {
+    // Snowpack band: above the permanent-glacier threshold but not permanently frozen.
+    // Proxy: annual-mean temp just above glacier_temp_threshold.
+    let upper = params.glacier_temp_threshold + 0.20;
+    (0..temperature.data.len())
+        .map(|i| {
+            if is_ocean[i] {
+                return 0.0;
+            }
+            let t = temperature.data[i];
+            if t >= params.glacier_temp_threshold && t < upper {
+                // Winter precip ≈ base - amp_x (season_phase=π → cos(π)=-1, sin(π)=0).
+                let winter_precip = (rainfall[i].base - rainfall[i].amp_x).max(0.0);
+                winter_precip
+            } else {
+                0.0
+            }
+        })
+        .collect()
+}
+
+/// Propagate source phasors (rainfall + snowmelt) downstream through the D8
+/// flow graph, accumulation-weighted, to give each cell the seasonal character
+/// of its upstream watershed.
+fn generate_seasonal_hydro(
+    rainfall: Vec<PrecipPhasor>,
+    snowmelt_amp: Vec<f32>,
+    snowmelt_peak: f32,
+    flow_to: &[Option<usize>],
+    topo_order: &[usize],
+    accumulation: &[f64],
+) -> SeasonalHydro {
+    let n = rainfall.len();
+
+    // Convert snowmelt into (amp_x, amp_y) components at snowmelt_peak phase.
+    let sm_cos = snowmelt_peak.cos();
+    let sm_sin = snowmelt_peak.sin();
+
+    // Initialise flow_phasor from local source (rainfall + snowmelt).
+    let mut flow_phasor: Vec<PrecipPhasor> = (0..n)
+        .map(|i| {
+            let sm = snowmelt_amp[i];
+            PrecipPhasor {
+                base:  rainfall[i].base,
+                amp_x: rainfall[i].amp_x + sm * sm_cos,
+                amp_y: rainfall[i].amp_y + sm * sm_sin,
+            }
+        })
+        .collect();
+
+    // Propagate downstream: each cell merges its upstream neighbours' phasors,
+    // weighted by their flow accumulation. Topological order (high→low) ensures
+    // upstream cells are already finalised when we visit a downstream cell.
+    //
+    // For each cell i in topo_order, if it drains to ds:
+    //   flow_phasor[ds] = weighted average of itself + flow_phasor[i]
+    // Weight of i = accumulation[i]; weight of ds's running total = accumulation[ds]
+    // after the accumulation pass has already summed everything.
+    //
+    // Since accumulation[ds] already includes accumulation[i] (from generate_hydrology
+    // Phase 5), we track a separate "received weight" to blend correctly.
+    let mut received: Vec<f64> = (0..n).map(|i| accumulation[i].max(1e-9)).collect();
+
+    for &idx in topo_order {
+        if let Some(ds) = flow_to[idx] {
+            let w_up = received[idx];
+            let w_ds = received[ds];
+            let total = w_up + w_ds;
+            flow_phasor[ds].base  = ((flow_phasor[ds].base  as f64 * w_ds + flow_phasor[idx].base  as f64 * w_up) / total) as f32;
+            flow_phasor[ds].amp_x = ((flow_phasor[ds].amp_x as f64 * w_ds + flow_phasor[idx].amp_x as f64 * w_up) / total) as f32;
+            flow_phasor[ds].amp_y = ((flow_phasor[ds].amp_y as f64 * w_ds + flow_phasor[idx].amp_y as f64 * w_up) / total) as f32;
+            received[ds] = total;
+        }
+    }
+
+    SeasonalHydro { rainfall, snowmelt_amp, snowmelt_peak, flow_phasor }
 }
 
 // ── HeatMap generation ───────────────────────────────────────────────────────
@@ -337,10 +510,13 @@ impl HeatMap {
     /// westerly weight. The double-pass handles the east-west seam: carry from
     /// the end of each row's first pass seeds the second pass, so moisture
     /// wraps around the globe correctly.
-    fn generate_precipitation(elevation: &HeatMap, is_ocean: &[bool], temperature: &HeatMap, is_sea_ice: &[bool], params: &PlanetParams) -> HeatMap {
+    fn generate_precipitation(elevation: &HeatMap, is_ocean: &[bool], temperature: &HeatMap, is_sea_ice: &[bool], params: &PlanetParams, season_phase: f64) -> HeatMap {
         let width = elevation.width;
         let height = elevation.height;
         let n = width * height;
+        // ITCZ and wind belts migrate with season. Half the tilt angle (in
+        // normalised lat units) is a reasonable proxy for the Hadley cell shift.
+        let season_offset = (params.axial_tilt.to_radians() * 0.5 / (PI / 2.0)) * season_phase.sin();
 
         let mut moisture_west = vec![0.0f64; n];
         let mut moisture_east = vec![0.0f64; n];
@@ -400,9 +576,9 @@ impl HeatMap {
                 let y = idx / width;
                 let abs_lat =
                     (y as f64 - height as f64 / 2.0).abs() / (height as f64 / 2.0);
-                let w = westerly_weight(abs_lat);
+                let w = westerly_weight(abs_lat, season_offset);
                 let moisture = moisture_west[idx] * w + moisture_east[idx] * (1.0 - w);
-                let band = lat_band_factor(abs_lat);
+                let band = lat_band_factor(abs_lat, season_offset);
                 let moisture_capacity = (0.3 + 0.7 * temperature.data[idx]).clamp(0.3, 1.0);
                 (band * (params.base_arid + moisture * (1.0 - params.base_arid)) * moisture_capacity).clamp(0.0, 1.0)
             })
@@ -704,6 +880,9 @@ impl HeatMap {
             map: HeatMap { width, height, data },
             aquifer_zones,
             is_endorheic: endorheic,
+            flow_to,
+            topo_order: land_order,
+            accumulation,
         }
     }
 
@@ -752,7 +931,8 @@ impl HeatMap {
 
 /// Latitude precipitation factor based on Earth's general circulation bands.
 /// Returns a [0, 1] multiplier applied before moisture weighting.
-fn lat_band_factor(abs_lat: f64) -> f64 {
+/// `season_offset` shifts all band latitudes (positive = ITCZ migrates north).
+fn lat_band_factor(abs_lat: f64, season_offset: f64) -> f64 {
     // Piecewise linear through calibrated breakpoints:
     //   equator: 1.0 (ITCZ)
     //   ~30°:    0.2 (subtropical desert)
@@ -769,11 +949,14 @@ fn lat_band_factor(abs_lat: f64) -> f64 {
         (0.78, 0.30),
         (1.00, 0.10),
     ];
+    // Shift abs_lat in the opposite direction: if ITCZ moves north (+offset),
+    // a given cell effectively sits at a lower latitude relative to the band.
+    let shifted = (abs_lat - season_offset).clamp(0.0, 1.0);
     for i in 0..stops.len() - 1 {
         let (ta, va) = stops[i];
         let (tb, vb) = stops[i + 1];
-        if abs_lat <= tb {
-            let t = (abs_lat - ta) / (tb - ta);
+        if shifted <= tb {
+            let t = (shifted - ta) / (tb - ta);
             return va + (vb - va) * t;
         }
     }
@@ -782,7 +965,8 @@ fn lat_band_factor(abs_lat: f64) -> f64 {
 
 /// Fraction of moisture contributed by the westerly sweep vs easterly sweep.
 /// 1.0 = pure westerlies, 0.0 = pure easterlies.
-fn westerly_weight(abs_lat: f64) -> f64 {
+/// `season_offset` shifts the wind belt latitudes with the season.
+fn westerly_weight(abs_lat: f64, season_offset: f64) -> f64 {
     // Westerlies dominate in mid-latitudes (~35–65°, abs_lat ~0.4–0.72).
     // Easterlies dominate in tropics and polar regions.
     let stops: &[(f64, f64)] = &[
@@ -794,11 +978,12 @@ fn westerly_weight(abs_lat: f64) -> f64 {
         (0.78, 0.10),
         (1.00, 0.00),
     ];
+    let shifted = (abs_lat - season_offset).clamp(0.0, 1.0);
     for i in 0..stops.len() - 1 {
         let (ta, va) = stops[i];
         let (tb, vb) = stops[i + 1];
-        if abs_lat <= tb {
-            let t = (abs_lat - ta) / (tb - ta);
+        if shifted <= tb {
+            let t = (shifted - ta) / (tb - ta);
             return va + (vb - va) * t;
         }
     }
@@ -1757,10 +1942,12 @@ fn main() {
                 parent_id:       None,
                 child_ids:       None,
                 coord:           CosmicCoordinates { x: 1.3, y: 0.0, z: 0.0 },
+                orbital_period:  536.0,
+                axial_tilt:      22.0,
+                rotation_period: 1.25,
                 radius:          0.88,
                 gravity:         0.83,
                 base_press:      84.7,
-                axial_tilt:      22.0,
                 atmo:            HashMap::from([
                     (AtmosphereTag::WaterVapor,    0.08),
                     (AtmosphereTag::Nitrogen,      0.76),
@@ -1837,7 +2024,7 @@ fn main() {
     println!("Generating climate...");
     let temperature   = HeatMap::generate_temperature(&elevation, &params);
     let is_sea_ice    = generate_sea_ice(&temperature, &is_ocean, params.sea_ice_temp_threshold);
-    let precipitation = HeatMap::generate_precipitation(&elevation, &is_ocean, &temperature, &is_sea_ice, &params);
+    let precipitation = HeatMap::generate_precipitation(&elevation, &is_ocean, &temperature, &is_sea_ice, &params, 0.0);
     let is_glacier    = generate_glacier(&temperature, &is_ocean, params.glacier_temp_threshold);
     let aridity       = HeatMap::generate_aridity(&temperature, &precipitation, params.et_factor);
 
@@ -1896,6 +2083,23 @@ fn main() {
     println!(
         "  {} aquifer recharge zones identified",
         result.aquifer_zones.len()
+    );
+
+    println!("Generating seasonal hydrology...");
+    let rainfall_phasors = generate_seasonal_precip(&elevation, &is_ocean, &temperature, &is_sea_ice, &params);
+    let snowmelt_amp = classify_snowpack(&temperature, &is_ocean, &rainfall_phasors, &params);
+    let snowpack_cells = snowmelt_amp.iter().filter(|&&a| a > 0.0).count();
+    let _seasonal_hydro = generate_seasonal_hydro(
+        rainfall_phasors,
+        snowmelt_amp,
+        (3.0 * PI / 2.0) as f32,
+        &result.flow_to,
+        &result.topo_order,
+        &result.accumulation,
+    );
+    println!(
+        "  {} snowpack cells classified; seasonal phasors propagated",
+        snowpack_cells
     );
 
     // Salt flats: endorheic basin floors that are arid enough and geologically
