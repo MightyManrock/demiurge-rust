@@ -2022,11 +2022,17 @@ fn main() {
     let is_ocean = flood_fill_ocean(&elevation.data, width, height, params.sea_level);
 
     println!("Generating climate...");
-    let temperature   = HeatMap::generate_temperature(&elevation, &params);
-    let is_sea_ice    = generate_sea_ice(&temperature, &is_ocean, params.sea_ice_temp_threshold);
-    let precipitation = HeatMap::generate_precipitation(&elevation, &is_ocean, &temperature, &is_sea_ice, &params, 0.0);
-    let is_glacier    = generate_glacier(&temperature, &is_ocean, params.glacier_temp_threshold);
-    let aridity       = HeatMap::generate_aridity(&temperature, &precipitation, params.et_factor);
+    let temperature      = HeatMap::generate_temperature(&elevation, &params);
+    let is_sea_ice       = generate_sea_ice(&temperature, &is_ocean, params.sea_ice_temp_threshold);
+    // Four seasonal passes; annual-mean phasor bases drive the base hydrology.
+    let rainfall_phasors = generate_seasonal_precip(&elevation, &is_ocean, &temperature, &is_sea_ice, &params);
+    let precipitation    = HeatMap {
+        width,
+        height,
+        data: rainfall_phasors.iter().map(|p| p.base as f64).collect(),
+    };
+    let is_glacier       = generate_glacier(&temperature, &is_ocean, params.glacier_temp_threshold);
+    let aridity          = HeatMap::generate_aridity(&temperature, &precipitation, params.et_factor);
 
     let temp_img = ImageBuffer::from_fn(width as u32, height as u32, |x, y| {
         let nx = x as f64 / width as f64;
@@ -2086,7 +2092,6 @@ fn main() {
     );
 
     println!("Generating seasonal hydrology...");
-    let rainfall_phasors = generate_seasonal_precip(&elevation, &is_ocean, &temperature, &is_sea_ice, &params);
     let snowmelt_amp = classify_snowpack(&temperature, &is_ocean, &rainfall_phasors, &params);
     let snowpack_cells = snowmelt_amp.iter().filter(|&&a| a > 0.0).count();
     let _seasonal_hydro = generate_seasonal_hydro(
