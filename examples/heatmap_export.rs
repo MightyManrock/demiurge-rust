@@ -516,7 +516,9 @@ impl HeatMap {
         let n = width * height;
         // ITCZ and wind belts migrate with season. Half the tilt angle (in
         // normalised lat units) is a reasonable proxy for the Hadley cell shift.
-        let season_offset = (params.axial_tilt.to_radians() * 0.5 / (PI / 2.0)) * season_phase.sin();
+        // Convention: phase 0 = northern summer solstice (cos=1, max northward shift),
+        //             phase π = northern winter solstice (cos=-1, max southward shift).
+        let season_offset = (params.axial_tilt.to_radians() * 0.5 / (PI / 2.0)) * season_phase.cos();
 
         let mut moisture_west = vec![0.0f64; n];
         let mut moisture_east = vec![0.0f64; n];
