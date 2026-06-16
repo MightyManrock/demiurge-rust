@@ -187,4 +187,19 @@ impl PlanetMapRenderer {
         // 1 tick = 1 Oros day; orbital period 536 days; update ~monthly
         536 / 12
     }
+
+    #[func]
+    pub fn star_kind_id(&self) -> i32 {
+        2 // YellowDwarf — generalize when PlanetParams stores StarKind
+    }
+
+    #[func]
+    pub fn star_luminosity(&self) -> f64 {
+        1.08
+    }
+
+    #[func]
+    pub fn star_radius(&self) -> f64 {
+        1.05
+    }
 }

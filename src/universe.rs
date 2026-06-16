@@ -86,6 +86,7 @@ pub struct Star {
     pub age: EntityAge,
     pub kind: StarKind,
     pub luminosity: f32,
+    pub radius: f32,           // solar radii
     pub parent_id: Option<Uuid>,        // System ID
     pub companion_ids: Option<Vec<Uuid>>, // Other Star IDs
     pub domain_exp: HashMap<DomainTag, f32>,

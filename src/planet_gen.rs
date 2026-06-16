@@ -135,6 +135,7 @@ impl PlanetParams {
             },
             kind:          StarKind::YellowDwarf,
             luminosity:    1.08,
+            radius:        1.05,
             parent_id:     None,
             companion_ids: None,
             domain_exp:    HashMap::new(),
