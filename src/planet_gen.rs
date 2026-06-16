@@ -113,6 +113,69 @@ impl PlanetParams {
         }
     }
 
+    pub fn oros() -> Self {
+        let null_age = EntityAge {
+            formation_billions: Some(3), formation_millions: None,
+            formation_thousands: None,   formation_years: 0,
+            formation_month: 0,          formation_day: 0,
+            age_billions: Some(3),       age_millions: None,
+            age_thousands: None,         age_years: None,
+            age_months: None,            age_days: 0,
+        };
+        let star = Star {
+            id:            Uuid::nil(),
+            name:          "Outer Reach Star".to_string(),
+            age:           EntityAge {
+                formation_billions: Some(4), formation_millions: None,
+                formation_thousands: None,   formation_years: 0,
+                formation_month: 0,          formation_day: 0,
+                age_billions: Some(4),       age_millions: None,
+                age_thousands: None,         age_years: None,
+                age_months: None,            age_days: 0,
+            },
+            kind:          StarKind::YellowDwarf,
+            luminosity:    1.08,
+            parent_id:     None,
+            companion_ids: None,
+            domain_exp:    HashMap::new(),
+        };
+        let oros = Planet {
+            id:              Uuid::parse_str("e3f92fd2-3501-40b4-957f-95d65dc4b51e").unwrap(),
+            name:            "Oros".to_string(),
+            age:             null_age,
+            parent_id:       None,
+            child_ids:       None,
+            coord:           CosmicCoordinates { x: 1.3, y: 0.0, z: 0.0 },
+            orbital_period:  536.0,
+            axial_tilt:      22.0,
+            rotation_period: 1.25,
+            radius:          0.88,
+            gravity:         0.83,
+            base_press:      84.7,
+            atmo: HashMap::from([
+                (AtmosphereTag::WaterVapor,    0.08),
+                (AtmosphereTag::Nitrogen,      0.76),
+                (AtmosphereTag::Oxygen,        0.15),
+                (AtmosphereTag::CarbonDioxide, 0.01),
+            ]),
+            geo: HashMap::from([
+                (GeoTag::Silicate,    0.48),
+                (GeoTag::Basaltic,    0.20),
+                (GeoTag::Ferrous,     0.14),
+                (GeoTag::Carbonate,   0.08),
+                (GeoTag::Crystalline, 0.10),
+            ]),
+            volcanism:       0.20,
+            hydro:           HashMap::from([(LiquidTag::Water, 1.0)]),
+            liquid_coverage: 0.33,
+            civ_ids:         None,
+            species_ids:     None,
+            domain_exp:      HashMap::new(),
+            footprint:       Footprint { kind: HashMap::new() },
+        };
+        Self::from_planet(&oros, &star)
+    }
+
     /// Derive generation parameters from a Planet entity and its host Star.
     pub fn from_planet(planet: &Planet, star: &Star) -> Self {
         // Insolation: luminosity / orbital-distance², normalised so that a
