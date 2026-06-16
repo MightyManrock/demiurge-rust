@@ -99,13 +99,9 @@ impl PlanetMapRenderer {
 
     #[func]
     pub fn seasonal_texture(&self, phase: f64) -> PackedByteArray {
-        let sh = self.seasonal_hydro.as_ref().expect("call initialize() first");
-        let season_angle = phase * 2.0 * PI;
-        let data: Vec<f64> = sh.flow_phasor.iter()
-            .map(|p| sample_precip_phasor(p, season_angle) as f64)
-            .collect();
-        self.render_hydro(&HeatMap { width: WIDTH, height: HEIGHT, data })
+        self.render_hydro(self.annual_hydro.as_ref().expect("call initialize() first"))
     }
+
 
     #[func]
     pub fn update_interval_ticks(&self) -> i64 {
