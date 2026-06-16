@@ -30,3 +30,4 @@ core.db
 *code-workspace
 
 *.png
+.superpowers/
