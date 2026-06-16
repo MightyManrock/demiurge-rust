@@ -4,6 +4,7 @@ pub mod universe;
 pub mod bio;
 pub mod data;
 pub mod planet_gen;
+mod planet_renderer;
 // pub mod mortal;
 // pub mod polis;
 
