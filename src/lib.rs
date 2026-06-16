@@ -5,3 +5,10 @@ pub mod bio;
 pub mod data;
 // pub mod mortal;
 // pub mod polis;
+
+use godot::prelude::*;
+
+struct DemiurgeExtension;
+
+#[gdextension]
+unsafe impl ExtensionLibrary for DemiurgeExtension {}
