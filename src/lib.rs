@@ -37,12 +37,35 @@ impl ISprite2D for Player {
     }
 
     fn physics_process(&mut self, delta: f64) {
-        // In GDScript, this would be: 
+        // GDScript code:
+        //
         // rotation += angular_speed * delta
+        // var velocity = Vector2.UP.rotated(rotation) * speed
+        // position += velocity * delta
         
         let radians = (self.angular_speed * delta) as f32;
         self.base_mut().rotate(radians);
-        // The 'rotate' method requires a f32, 
-        // therefore we convert 'self.angular_speed * delta' which is a f64 to a f32
+
+        let rotation = self.base().get_rotation();
+        let velocity = Vector2::UP.rotated(rotation) * self.speed as f32;
+        self.base_mut().translate(velocity * delta as f32);
+        
+        // or verbose: 
+        // let this = self.base_mut();
+        // this.set_position(
+        //     this.position() + velocity * delta as f32
+        // );
     }
+}
+
+#[godot_api]
+impl Player {
+    #[func]
+    fn increase_speed(&mut self, amount: f64) {
+        self.speed += amount;
+        self.signals().speed_increased().emit();
+    }
+
+    #[signal]
+    fn speed_increased();
 }

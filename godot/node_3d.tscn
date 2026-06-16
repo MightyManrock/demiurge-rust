@@ -1,0 +1,23 @@
+[gd_scene format=3 uid="uid://blkgncs3pogvw"]
+
+[ext_resource type="Texture2D" uid="uid://dqs34ep4p3c1b" path="res://textures/composite.png" id="1_a202f"]
+
+[sub_resource type="SphereMesh" id="SphereMesh_noarx"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_a0tk4"]
+albedo_texture = ExtResource("1_a202f")
+
+[node name="Node3D" type="Node3D" unique_id=1964667527]
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="." unique_id=280615879]
+transform = Transform3D(0.92718387, -0.3746066, 0, 0.3746066, 0.92718387, 0, 0, 0, 1, 0, 0, 0)
+mesh = SubResource("SphereMesh_noarx")
+surface_material_override/0 = SubResource("StandardMaterial3D_a0tk4")
+
+[node name="Camera3D" type="Camera3D" parent="." unique_id=1208238580]
+transform = Transform3D(0.15802017, -0.067281105, 0.9851411, 0, 0.99767596, 0.06813719, -0.98743594, -0.01076705, 0.15765293, 0.94929755, 0.061969936, 0.21335754)
+keep_aspect = 0
+fov = 96.27554
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=1367713888]
+transform = Transform3D(0.9503149, -0.12096027, 0.2868278, 0, 0.92141616, 0.38857722, -0.31129017, -0.3692707, 0.8756355, 0.5492939, 0.6562762, 1.781349)

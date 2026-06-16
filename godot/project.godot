@@ -11,7 +11,6 @@ config_version=5
 [application]
 
 config/name="Demiurge"
-run/main_scene="uid://d3pma8h8vwpe6"
 config/features=PackedStringArray("4.6", "Forward Plus")
 config/icon="res://icon.svg"
 
