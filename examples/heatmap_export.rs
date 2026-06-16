@@ -82,7 +82,7 @@ fn main() {
     let is_ocean = flood_fill_ocean(&elevation.data, width, height, params.sea_level);
 
     println!("Generating climate...");
-    let temperature      = HeatMap::generate_temperature(&elevation, &params);
+    let temperature      = HeatMap::generate_temperature(&elevation, &params, 0.0);
     let is_sea_ice       = generate_sea_ice(&temperature, &is_ocean, params.sea_ice_temp_threshold);
     // Four seasonal passes; annual-mean phasor bases drive the base hydrology.
     let rainfall_phasors = generate_seasonal_precip(&elevation, &is_ocean, &temperature, &is_sea_ice, &params);

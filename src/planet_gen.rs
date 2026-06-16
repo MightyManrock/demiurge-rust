@@ -9,7 +9,7 @@ use crate::bio::{
 };
 use crate::common::Range;
 use uuid::Uuid;
-use image::{ImageBuffer, Rgb};
+use image::{ImageBuffer, Rgb, Rgba};
 use noise::{Fbm, NoiseFn, Perlin};
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, VecDeque};
@@ -547,16 +547,22 @@ impl HeatMap {
     ///
     /// `temp_baseline` sets the equatorial surface temperature [0,1]; `temp_gradient`
     /// controls how steeply it drops toward the poles (1.0 = full drop to 0, 0.1 = nearly flat).
-    pub fn generate_temperature(elevation: &HeatMap, params: &PlanetParams) -> HeatMap {
+    pub fn generate_temperature(elevation: &HeatMap, params: &PlanetParams, season_phase: f64) -> HeatMap {
         let width  = elevation.width;
         let height = elevation.height;
+
+        // Axial tilt shifts the insolation peak north/south with the season.
+        // Convention matches generate_precipitation: phase 0 = northern summer.
+        let season_offset = (params.axial_tilt.to_radians() * 0.5 / (PI / 2.0))
+            * (season_phase * 2.0 * PI).cos();
 
         let data = (0..width * height)
             .map(|idx| {
                 let y = idx / width;
                 let abs_lat =
                     (y as f64 - height as f64 / 2.0).abs() / (height as f64 / 2.0);
-                let lat_shape = (abs_lat * std::f64::consts::FRAC_PI_2).cos();
+                let shifted_lat = (abs_lat - season_offset).abs().clamp(0.0, 1.0);
+                let lat_shape = (shifted_lat * std::f64::consts::FRAC_PI_2).cos();
                 let lat_temp  =
                     params.temp_baseline * (1.0 - params.temp_gradient * (1.0 - lat_shape));
                 (lat_temp - elevation.data[idx] * params.lapse_factor).clamp(0.0, 1.0)
@@ -2124,5 +2130,177 @@ pub fn render_composite_map(
             ];
         }
         image::Rgb(color)
+    })
+}
+
+pub fn render_terrain_layer(
+    width: usize, _height: usize,
+    render_width: usize, render_height: usize,
+    elevation: &HeatMap,
+    aridity: &HeatMap,
+    is_ocean: &[bool],
+    is_salt_flat: &[bool],
+    salt_flat_dist: &[u32],
+    params: &PlanetParams,
+) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
+    const RENDER_SCALE: usize = 3;
+    const N_DITHER_LEVELS: usize = 16;
+    const N_CONTOURS: usize = 40;
+    const CONTOUR_DARKEN: f64 = 0.90;
+    const SALT_FLAT_DITHER_DIST: u32 = 14;
+
+    ImageBuffer::from_fn(render_width as u32, render_height as u32, |rx, ry| {
+        let nx = rx as f64 / render_width as f64;
+        let ny = ry as f64 / render_height as f64;
+        let data_idx = (ry as usize / RENDER_SCALE) * width + (rx as usize / RENDER_SCALE);
+
+        let rgb = if is_ocean[data_idx] {
+            [20u8, 35, 55]
+        } else if is_salt_flat[data_idx] {
+            let coverage = salt_flat_dist[data_idx] as f64 / SALT_FLAT_DITHER_DIST as f64;
+            if BAYER_4X4[ry as usize % 4][rx as usize % 4] < coverage {
+                let d = bayer_dither(aridity.sample(nx, ny), rx as usize, ry as usize, N_DITHER_LEVELS);
+                salt_flat_color(d)
+            } else {
+                let land_t = ((elevation.sample(nx, ny) - params.sea_level) / (1.0 - params.sea_level)).clamp(0.0, 1.0);
+                terrain_color(bayer_dither(land_t, rx as usize, ry as usize, N_DITHER_LEVELS))
+            }
+        } else {
+            let land_t = ((elevation.sample(nx, ny) - params.sea_level) / (1.0 - params.sea_level)).clamp(0.0, 1.0);
+            terrain_color(bayer_dither(land_t, rx as usize, ry as usize, N_DITHER_LEVELS))
+        };
+
+        let nx_r = (rx as usize + 1) as f64 / render_width as f64;
+        let ny_d = (ry as usize + 1) as f64 / render_height as f64;
+        let darken = if !is_ocean[data_idx]
+            && is_contour(elevation.sample(nx, ny), elevation.sample(nx_r, ny), elevation.sample(nx, ny_d), N_CONTOURS)
+        {
+            CONTOUR_DARKEN
+        } else {
+            1.0
+        };
+
+        Rgba([
+            (rgb[0] as f64 * darken) as u8,
+            (rgb[1] as f64 * darken) as u8,
+            (rgb[2] as f64 * darken) as u8,
+            255,
+        ])
+    })
+}
+
+pub fn render_hydrology_layer(
+    width: usize, height: usize,
+    render_width: usize, render_height: usize,
+    hydro_map: &HeatMap,
+) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
+    const RENDER_SCALE: usize = 3;
+    const N_DITHER_LEVELS: usize = 16;
+
+    ImageBuffer::from_fn(render_width as u32, render_height as u32, |rx, ry| {
+        let nx = rx as f64 / render_width as f64;
+        let ny = ry as f64 / render_height as f64;
+        let dx = rx as usize / RENDER_SCALE;
+        let dy = ry as usize / RENDER_SCALE;
+        let off_x = rx as usize % RENDER_SCALE;
+        let off_y = ry as usize % RENDER_SCALE;
+
+        let hydro_nearest = hydro_map.sample_nearest(nx, ny);
+
+        let is_water = if hydro_nearest <= 0.0 {
+            false
+        } else if hydro_nearest <= 0.3 {
+            true
+        } else {
+            const EDGE_COVERAGE: f64 = 0.0025;
+            let neighbor = |ndx: i64, ndy: i64| -> f64 {
+                let nnx = ndx.rem_euclid(width as i64) as usize;
+                let nny = ndy.clamp(0, height as i64 - 1) as usize;
+                hydro_map.data[nny * width + nnx]
+            };
+            let mut coverage = 1.0f64;
+            if off_x == 0 && neighbor(dx as i64 - 1, dy as i64) <= 0.0 { coverage = EDGE_COVERAGE; }
+            if off_x == 2 && neighbor(dx as i64 + 1, dy as i64) <= 0.0 { coverage = EDGE_COVERAGE; }
+            if off_y == 0 && neighbor(dx as i64, dy as i64 - 1) <= 0.0 { coverage = EDGE_COVERAGE; }
+            if off_y == 2 && neighbor(dx as i64, dy as i64 + 1) <= 0.0 { coverage = EDGE_COVERAGE; }
+            BAYER_4X4[ry as usize % 4][rx as usize % 4] < coverage
+        };
+
+        if is_water {
+            let d = bayer_dither(hydro_nearest, rx as usize, ry as usize, N_DITHER_LEVELS).max(0.01);
+            let [r, g, b] = water_color(d);
+            Rgba([r, g, b, 255])
+        } else {
+            Rgba([0, 0, 0, 0])
+        }
+    })
+}
+
+pub fn render_ice_layer(
+    width: usize, height: usize,
+    render_width: usize, render_height: usize,
+    temperature: &HeatMap,
+    is_glacier: &[bool],
+    is_sea_ice: &[bool],
+    is_ocean: &[bool],
+    annual_hydro: &HeatMap,
+    params: &PlanetParams,
+) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
+    const RENDER_SCALE: usize = 3;
+    const N_DITHER_LEVELS: usize = 16;
+
+    ImageBuffer::from_fn(render_width as u32, render_height as u32, |rx, ry| {
+        let nx = rx as f64 / render_width as f64;
+        let ny = ry as f64 / render_height as f64;
+        let data_idx = (ry as usize / RENDER_SCALE) * width + (rx as usize / RENDER_SCALE);
+        let dx = rx as usize / RENDER_SCALE;
+        let dy = ry as usize / RENDER_SCALE;
+        let off_x = rx as usize % RENDER_SCALE;
+        let off_y = ry as usize % RENDER_SCALE;
+
+        if is_ocean[data_idx] && is_sea_ice[data_idx] {
+            let sea_ice_neighbor = |ndx: i64, ndy: i64| -> bool {
+                let nnx = ndx.rem_euclid(width as i64) as usize;
+                let nny = ndy.clamp(0, height as i64 - 1) as usize;
+                is_sea_ice[nny * width + nnx]
+            };
+            const SEA_ICE_EDGE: f64 = 0.05;
+            let mut coverage = 1.0f64;
+            if off_x == 0 && !sea_ice_neighbor(dx as i64 - 1, dy as i64) { coverage = SEA_ICE_EDGE; }
+            if off_x == 2 && !sea_ice_neighbor(dx as i64 + 1, dy as i64) { coverage = SEA_ICE_EDGE; }
+            if off_y == 0 && !sea_ice_neighbor(dx as i64, dy as i64 - 1) { coverage = SEA_ICE_EDGE; }
+            if off_y == 2 && !sea_ice_neighbor(dx as i64, dy as i64 + 1) { coverage = SEA_ICE_EDGE; }
+            if BAYER_4X4[ry as usize % 4][rx as usize % 4] < coverage {
+                let t = temperature.sample(nx, ny);
+                let d = bayer_dither(t / params.sea_ice_temp_threshold, rx as usize, ry as usize, N_DITHER_LEVELS);
+                let [r, g, b] = sea_ice_color(d, params.sea_ice_temp_threshold);
+                Rgba([r, g, b, 255])
+            } else {
+                Rgba([0, 0, 0, 0])
+            }
+        } else if is_glacier[data_idx] {
+            let non_glacier_land = |ndx: i64, ndy: i64| -> bool {
+                let nnx = ndx.rem_euclid(width as i64) as usize;
+                let nny = ndy.clamp(0, height as i64 - 1) as usize;
+                let nidx = nny * width + nnx;
+                !is_glacier[nidx] && !is_ocean[nidx] && annual_hydro.data[nidx] <= 0.0
+            };
+            const GLACIER_EDGE: f64 = 0.05;
+            let mut coverage = 1.0f64;
+            if off_x == 0 && non_glacier_land(dx as i64 - 1, dy as i64) { coverage = GLACIER_EDGE; }
+            if off_x == 2 && non_glacier_land(dx as i64 + 1, dy as i64) { coverage = GLACIER_EDGE; }
+            if off_y == 0 && non_glacier_land(dx as i64, dy as i64 - 1) { coverage = GLACIER_EDGE; }
+            if off_y == 2 && non_glacier_land(dx as i64, dy as i64 + 1) { coverage = GLACIER_EDGE; }
+            if BAYER_4X4[ry as usize % 4][rx as usize % 4] < coverage {
+                let t = temperature.sample(nx, ny);
+                let d = bayer_dither(t / params.glacier_temp_threshold, rx as usize, ry as usize, N_DITHER_LEVELS);
+                let [r, g, b] = glacier_color(d, params.glacier_temp_threshold);
+                Rgba([r, g, b, 255])
+            } else {
+                Rgba([0, 0, 0, 0])
+            }
+        } else {
+            Rgba([0, 0, 0, 0])
+        }
     })
 }
