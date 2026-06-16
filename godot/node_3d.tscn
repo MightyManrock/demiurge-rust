@@ -12,9 +12,16 @@ transform = Transform3D(0.92718387, -0.3746066, 0, 0.3746066, 0.92718387, 0, 0, 
 mesh = SubResource("SphereMesh_noarx")
 
 [node name="Camera3D" type="Camera3D" parent="." unique_id=1208238580]
-transform = Transform3D(0.15802017, -0.067281105, 0.9851411, 0, 0.99767596, 0.06813719, -0.98743594, -0.01076705, 0.15765293, 0.94929755, 0.061969936, 0.21335754)
+transform = Transform3D(-0.22429805, -0.96761507, 0.11580834, -0.03552833, -0.11063787, -0.9932256, 0.9738728, -0.22689302, -0.009561887, 0.23456609, -0.9737088, -0.16033006)
 keep_aspect = 0
 fov = 96.27554
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=1367713888]
 transform = Transform3D(0.9503149, -0.12096027, 0.2868278, 0, 0.92141616, 0.38857722, -0.31129017, -0.3692707, 0.8756355, 0.5492939, 0.6562762, 1.781349)
+
+[node name="CheckButton" type="CheckButton" parent="." unique_id=1412176635]
+offset_right = 44.0
+offset_bottom = 24.0
+text = "Planet View"
+
+[connection signal="toggled" from="CheckButton" to="." method="_on_check_button_toggled"]

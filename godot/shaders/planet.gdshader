@@ -1,5 +1,4 @@
 shader_type spatial;
-render_mode unshaded;
 
 uniform sampler2D terrain_tex : source_color;
 uniform sampler2D hydro_a     : source_color;
