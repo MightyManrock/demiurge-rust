@@ -1,8 +1,7 @@
 [gd_scene format=3 uid="uid://d3pma8h8vwpe6"]
 
-[node name="Label" type="Label" unique_id=843625237]
-offset_left = 536.0
-offset_top = 323.0
-offset_right = 629.0
-offset_bottom = 346.0
-text = "Hello world!"
+[ext_resource type="Texture2D" uid="uid://b740ot8p2a8fv" path="res://icon.svg" id="1_y38sv"]
+
+[node name="Sprite2D" type="Player" unique_id=224092601]
+position = Vector2(576, 320)
+texture = ExtResource("1_y38sv")
