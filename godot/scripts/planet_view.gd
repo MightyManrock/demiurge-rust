@@ -43,11 +43,12 @@ var _ticks_paused:   bool = false
 var _oros_selected:  bool = false
 
 # --- Arcball state -----------------------------------------------------------
-var _yaw:          float = 0.0
-var _pitch:        float = 0.3
-var _orbit_radius: float = ORBIT_CAM_DIST
-var _drag_active:  bool  = false
-var _last_mouse:   Vector2 = Vector2.ZERO
+var _yaw:             float = 0.0
+var _pitch:           float = 0.3
+var _orbit_radius:    float = ORBIT_CAM_DIST
+var _drag_active:     bool  = false
+var _last_mouse:      Vector2 = Vector2.ZERO
+var _planet_rotation: float = 0.0
 
 # --- System camera pan state -------------------------------------------------
 var _sys_pan_active: bool    = false
@@ -237,7 +238,9 @@ func _process_system_camera(_delta: float) -> void:
 		_sys_pan_active = false
 
 func _process_planet_camera(delta: float) -> void:
-	($PlanetSphere as MeshInstance3D).rotate_y(delta * TAU / (ROTATION_PERIOD * SECS_PER_TICK))
+	var rot_delta := delta * TAU / (ROTATION_PERIOD * SECS_PER_TICK)
+	($PlanetSphere as MeshInstance3D).rotate_y(rot_delta)
+	_planet_rotation += rot_delta
 
 	var speed := 1.2 * delta
 	if Input.is_key_pressed(KEY_A): _yaw   -= speed
@@ -254,11 +257,12 @@ func _process_planet_camera(delta: float) -> void:
 		_pitch -= dm.y * 0.005
 		_pitch  = clamp(_pitch, -1.38, 1.38)
 
-	var oros_pos := ($SystemView/OrosProxy as MeshInstance3D).global_position
-	var offset   := Vector3(
-		sin(_yaw) * cos(_pitch),
+	var world_yaw := _yaw + _planet_rotation
+	var oros_pos  := ($SystemView/OrosProxy as MeshInstance3D).global_position
+	var offset    := Vector3(
+		sin(world_yaw) * cos(_pitch),
 		sin(_pitch),
-		cos(_yaw) * cos(_pitch)
+		cos(world_yaw) * cos(_pitch)
 	) * _orbit_radius
 	var cam := $Camera3D as Camera3D
 	cam.global_position = oros_pos + offset
