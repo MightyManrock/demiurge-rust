@@ -5,7 +5,7 @@ const TEX_WIDTH          := 512 * 3
 const TEX_HEIGHT         := 256 * 3
 const ORBITAL_PERIOD     := 536
 const ORBIT_RADIUS       := 8.0
-const PLANET_PROXY_SCALE := 0.18
+const PLANET_PROXY_SCALE := 0.4
 const ORBIT_CAM_DIST     := 2.5
 const STAR_SCALE_FACTOR  := 1.2
 const SYS_ORTHO_SIZE     := 16.0
@@ -66,7 +66,7 @@ func _ready() -> void:
 	_build_textures()
 	_build_materials()
 	_setup_star()
-	_setup_orbital_ring()
+	#_setup_orbital_ring()
 	_setup_oros_proxy()
 	_enter_system_view_immediate()
 
@@ -186,7 +186,7 @@ func _look_toward(_t: float, target: Vector3) -> void:
 	($Camera3D as Camera3D).look_at(target, Vector3.UP)
 
 func _mid_zoom_in(_oros_pos: Vector3) -> void:
-	$SystemView/OrbitalRing.visible = false
+	#$SystemView/OrbitalRing.visible = false
 	$SystemView/OrosProxy.visible   = false
 	$PlanetSphere.visible           = true
 
@@ -199,7 +199,7 @@ func _finish_zoom_in() -> void:
 
 func _mid_zoom_out() -> void:
 	$PlanetSphere.visible           = false
-	$SystemView/OrbitalRing.visible = true
+	#$SystemView/OrbitalRing.visible = true
 	$SystemView/OrosProxy.visible   = true
 
 func _finish_zoom_out() -> void:
@@ -221,7 +221,7 @@ func _enter_system_view_immediate() -> void:
 	cam.size       = SYS_ORTHO_SIZE
 	cam.position   = SYS_CAM_POS
 	cam.look_at(Vector3.ZERO, Vector3.UP)
-	$SystemView/OrbitalRing.visible = true
+	#$SystemView/OrbitalRing.visible = true
 	$SystemView/OrosProxy.visible   = true
 	$PlanetSphere.visible           = false
 	($UI/ZoomInButton as Button).visible = false
@@ -309,21 +309,21 @@ func _setup_star() -> void:
 
 	($DirectionalLight3D as DirectionalLight3D).light_color = col
 
-func _setup_orbital_ring() -> void:
-	var mesh        := TorusMesh.new()
-	mesh.inner_radius = ORBIT_RADIUS - 0.05
-	mesh.outer_radius = ORBIT_RADIUS + 0.05
-
-	var mat                       := StandardMaterial3D.new()
-	mat.albedo_color               = Color(0.4, 0.6, 1.0)
-	mat.emission_enabled           = true
-	mat.emission                   = Color(0.4, 0.6, 1.0)
-	mat.emission_energy_multiplier = 1.0
-	mat.shading_mode               = BaseMaterial3D.SHADING_MODE_UNSHADED
-
-	var ring    := $SystemView/OrbitalRing as MeshInstance3D
-	ring.mesh   = mesh
-	ring.set_surface_override_material(0, mat)
+#func _setup_orbital_ring() -> void:
+#	var mesh        := TorusMesh.new()
+#	mesh.inner_radius = ORBIT_RADIUS - 0.05
+#	mesh.outer_radius = ORBIT_RADIUS + 0.05
+#
+#	var mat                       := StandardMaterial3D.new()
+#	mat.albedo_color               = Color(0.4, 0.6, 1.0)
+#	mat.emission_enabled           = true
+#	mat.emission                   = Color(0.4, 0.6, 1.0)
+#	mat.emission_energy_multiplier = 1.0
+#	mat.shading_mode               = BaseMaterial3D.SHADING_MODE_UNSHADED
+#
+#	var ring    := $SystemView/OrbitalRing as MeshInstance3D
+#	ring.mesh   = mesh
+#	ring.set_surface_override_material(0, mat)
 
 func _setup_oros_proxy() -> void:
 	var proxy       := $SystemView/OrosProxy as MeshInstance3D
@@ -335,7 +335,7 @@ func _setup_oros_proxy() -> void:
 	# a generous click target without looking wrong visually.
 	var col_shape  := $SystemView/OrosProxy/Area3D/CollisionShape3D as CollisionShape3D
 	var sphere     := SphereShape3D.new()
-	sphere.radius   = 1.0
+	sphere.radius   = 1.5
 	col_shape.shape     = sphere
 	col_shape.transform = Transform3D.IDENTITY
 
