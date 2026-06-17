@@ -324,9 +324,10 @@ func _setup_oros_proxy() -> void:
 
 func _update_orbital_position() -> void:
 	var angle := float(tick % ORBITAL_PERIOD) / float(ORBITAL_PERIOD) * TAU
-	($SystemView/OrosProxy as MeshInstance3D).position = Vector3(
-		cos(angle) * ORBIT_RADIUS, 0.0, sin(angle) * ORBIT_RADIUS
-	)
+	var pos   := Vector3(cos(angle) * ORBIT_RADIUS, 0.0, sin(angle) * ORBIT_RADIUS)
+	($SystemView/OrosProxy as MeshInstance3D).position = pos
+	if _in_planet_view:
+		($PlanetSphere as MeshInstance3D).global_position = pos
 
 # --- Textures / materials ----------------------------------------------------
 
