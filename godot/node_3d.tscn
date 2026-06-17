@@ -4,24 +4,67 @@
 
 [sub_resource type="SphereMesh" id="SphereMesh_noarx"]
 
+[sub_resource type="SphereMesh" id="SphereMesh_a202f"]
+
+[sub_resource type="SphereMesh" id="SphereMesh_a0tk4"]
+
+[sub_resource type="SphereMesh" id="SphereMesh_r3fl7"]
+
+[sub_resource type="SphereMesh" id="SphereMesh_jka67"]
+
+[sub_resource type="SphereShape3D" id="SphereShape3D_i5arm"]
+
 [node name="Node3D" type="Node3D" unique_id=1964667527]
 script = ExtResource("2_noarx")
 
-[node name="MeshInstance3D" type="MeshInstance3D" parent="." unique_id=280615879]
+[node name="PlanetSphere" type="MeshInstance3D" parent="." unique_id=280615879]
 transform = Transform3D(0.92718387, -0.3746066, 0, 0.3746066, 0.92718387, 0, 0, 0, 1, 0, 0, 0)
 mesh = SubResource("SphereMesh_noarx")
 
-[node name="Camera3D" type="Camera3D" parent="." unique_id=1208238580]
-transform = Transform3D(-0.22429805, -0.96761507, 0.11580834, -0.03552833, -0.11063787, -0.9932256, 0.9738728, -0.22689302, -0.009561887, 0.23456609, -0.9737088, -0.16033006)
-keep_aspect = 0
-fov = 96.27554
+[node name="SystemView" type="Node3D" parent="." unique_id=1115885441]
 
-[node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=1367713888]
-transform = Transform3D(0.9503149, -0.12096027, 0.2868278, 0, 0.92141616, 0.38857722, -0.31129017, -0.3692707, 0.8756355, 0.5492939, 0.6562762, 1.781349)
+[node name="Star" type="MeshInstance3D" parent="SystemView" unique_id=1491008061]
+mesh = SubResource("SphereMesh_a202f")
 
-[node name="CheckButton" type="CheckButton" parent="." unique_id=1412176635]
-offset_right = 44.0
-offset_bottom = 24.0
-text = "Planet View"
+[node name="StarHaloInner" type="MeshInstance3D" parent="SystemView" unique_id=1034646357]
+mesh = SubResource("SphereMesh_a0tk4")
 
-[connection signal="toggled" from="CheckButton" to="." method="_on_check_button_toggled"]
+[node name="StarHaloOuter" type="MeshInstance3D" parent="SystemView" unique_id=2017994604]
+mesh = SubResource("SphereMesh_r3fl7")
+
+[node name="OrbitalRing" type="MeshInstance3D" parent="SystemView" unique_id=1358429437]
+
+[node name="OrosProxy" type="MeshInstance3D" parent="SystemView" unique_id=1679690820]
+mesh = SubResource("SphereMesh_jka67")
+
+[node name="Area3D" type="Area3D" parent="SystemView/OrosProxy" unique_id=1246931676]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="SystemView/OrosProxy/Area3D" unique_id=762239991]
+transform = Transform3D(0.18, 0, 0, 0, 0.18, 0, 0, 0, 0.18, 0, 0, 0)
+shape = SubResource("SphereShape3D_i5arm")
+
+[node name="UI" type="CanvasLayer" parent="." unique_id=902113951]
+
+[node name="ZoomInButton" type="Button" parent="UI" unique_id=1045799511]
+offset_left = 1072.0
+offset_top = 572.0
+offset_right = 1144.0
+offset_bottom = 603.0
+text = "Zoom In"
+
+[node name="BackButton" type="Button" parent="UI" unique_id=643030222]
+offset_left = 1096.0
+offset_top = 608.0
+offset_right = 1141.0
+offset_bottom = 639.0
+text = "Back"
+
+[node name="Camera3D" type="Camera3D" parent="." unique_id=307295006]
+transform = Transform3D(0.017382577, -0.9164503, 0.3997706, 0.12115689, 0.39881542, 0.9089925, -0.99248123, 0.032634333, 0.117966704, 56.7651, 22.133701, -23.94114)
+projection = 1
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=1691712394]
+
+[connection signal="input_event" from="SystemView/OrosProxy/Area3D" to="." method="_on_oros_proxy_input_event"]
+[connection signal="pressed" from="UI/ZoomInButton" to="." method="_on_zoom_in_pressed"]
+[connection signal="pressed" from="UI/BackButton" to="." method="_on_back_pressed"]
