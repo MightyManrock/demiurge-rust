@@ -90,11 +90,18 @@ func _input(event: InputEvent) -> void:
 	if _in_planet_view or _transitioning:
 		return
 	if event is InputEventMouseButton:
-		var cam := $Camera3D as Camera3D
+		var cam       := $Camera3D as Camera3D
+		var mouse_pos := get_viewport().get_mouse_position()
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
-			cam.size = clamp(cam.size - 1.5, 4.0, 40.0)
+			var before := cam.project_position(mouse_pos, cam.size)
+			cam.size    = clamp(cam.size - 1.5, 4.0, 40.0)
+			var after  := cam.project_position(mouse_pos, cam.size)
+			cam.position += before - after
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			cam.size = clamp(cam.size + 1.5, 4.0, 40.0)
+			var before := cam.project_position(mouse_pos, cam.size)
+			cam.size    = clamp(cam.size + 1.5, 4.0, 40.0)
+			var after  := cam.project_position(mouse_pos, cam.size)
+			cam.position += before - after
 
 func _unhandled_input(event: InputEvent) -> void:
 	if _transitioning:
@@ -126,6 +133,9 @@ func _on_zoom_in_pressed() -> void:
 		sin(_pitch),
 		cos(_yaw) * cos(_pitch)
 	) * _orbit_radius
+
+	# Pre-position PlanetSphere before it becomes visible so there's no pop.
+	($PlanetSphere as MeshInstance3D).global_position = oros_pos
 
 	cam.projection = Camera3D.PROJECTION_PERSPECTIVE
 	cam.fov        = 70.0
@@ -168,10 +178,10 @@ func _on_oros_proxy_input_event(_camera: Node, event: InputEvent,
 func _look_toward(_t: float, target: Vector3) -> void:
 	($Camera3D as Camera3D).look_at(target, Vector3.UP)
 
-func _mid_zoom_in(oros_pos: Vector3) -> void:
-	$SystemView.visible   = false
-	$PlanetSphere.visible = true
-	($PlanetSphere as MeshInstance3D).global_position = oros_pos
+func _mid_zoom_in(_oros_pos: Vector3) -> void:
+	$SystemView/OrbitalRing.visible = false
+	$SystemView/OrosProxy.visible   = false
+	$PlanetSphere.visible           = true
 
 func _finish_zoom_in() -> void:
 	($PlanetSphere as MeshInstance3D).set_surface_override_material(0, shader_mat)
@@ -181,8 +191,9 @@ func _finish_zoom_in() -> void:
 	($UI/BackButton as Button).visible = true
 
 func _mid_zoom_out() -> void:
-	$PlanetSphere.visible = false
-	$SystemView.visible   = true
+	$PlanetSphere.visible           = false
+	$SystemView/OrbitalRing.visible = true
+	$SystemView/OrosProxy.visible   = true
 
 func _finish_zoom_out() -> void:
 	var cam    := $Camera3D as Camera3D
@@ -203,8 +214,9 @@ func _enter_system_view_immediate() -> void:
 	cam.size       = SYS_ORTHO_SIZE
 	cam.position   = SYS_CAM_POS
 	cam.look_at(Vector3.ZERO, Vector3.UP)
-	$SystemView.visible   = true
-	$PlanetSphere.visible = false
+	$SystemView/OrbitalRing.visible = true
+	$SystemView/OrosProxy.visible   = true
+	$PlanetSphere.visible           = false
 	($UI/ZoomInButton as Button).visible = false
 	($UI/BackButton as Button).visible   = false
 
@@ -328,6 +340,9 @@ func _update_orbital_position() -> void:
 	($SystemView/OrosProxy as MeshInstance3D).position = pos
 	if _in_planet_view:
 		($PlanetSphere as MeshInstance3D).global_position = pos
+	# Point directional light from star (origin) toward Oros for day/night cycle.
+	var light := $DirectionalLight3D as DirectionalLight3D
+	light.look_at_from_position(Vector3.ZERO, pos, Vector3.UP)
 
 # --- Textures / materials ----------------------------------------------------
 
