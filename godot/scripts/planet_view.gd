@@ -318,8 +318,7 @@ func _setup_orbital_ring() -> void:
 	mat.emission_enabled           = true
 	mat.emission                   = Color(0.4, 0.6, 1.0)
 	mat.emission_energy_multiplier = 0.4
-	mat.albedo_color               = Color(0.0, 0.0, 0.0, 0.0)
-	mat.transparency               = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.albedo_color               = Color(0.0, 0.0, 0.0, 1.0)
 	mat.shading_mode               = BaseMaterial3D.SHADING_MODE_UNSHADED
 
 	var ring    := $SystemView/OrbitalRing as MeshInstance3D
