@@ -10,7 +10,7 @@ const ORBIT_CAM_DIST     := 2.5
 const STAR_SCALE_FACTOR  := 1.2
 const SYS_ORTHO_SIZE     := 16.0
 const SYS_CAM_POS        := Vector3(0.0, 18.0, 12.0)
-const SYS_CAM_ROT_X      := -0.982  # ~56 degrees down, radians
+const SECS_PER_TICK      := 0.1     # real seconds per game day; raise to slow down
 
 # Star color by kind id: BlueGiant=0 WhiteStar=1 YellowDwarf=2
 #                        OrangeDwarf=3 RedDwarf=4 RedGiant=5 WhiteDwarf=6
@@ -51,6 +51,7 @@ var _last_mouse:   Vector2 = Vector2.ZERO
 # --- System camera pan state -------------------------------------------------
 var _sys_pan_active: bool    = false
 var _sys_last_mouse: Vector2 = Vector2.ZERO
+var _tick_accum:     float   = 0.0
 
 # =============================================================================
 
@@ -71,10 +72,13 @@ func _process(delta: float) -> void:
 	if _transitioning:
 		return
 	if not _ticks_paused:
-		tick += 1
-		_update_orbital_position()
-		if _in_planet_view and tick % update_interval == 0:
-			_update_season_shader()
+		_tick_accum += delta
+		while _tick_accum >= SECS_PER_TICK:
+			_tick_accum -= SECS_PER_TICK
+			tick += 1
+			_update_orbital_position()
+			if _in_planet_view and tick % update_interval == 0:
+				_update_season_shader()
 	if _in_planet_view:
 		_process_planet_camera(delta)
 	else:
@@ -184,7 +188,8 @@ func _finish_zoom_out() -> void:
 	var cam    := $Camera3D as Camera3D
 	cam.projection = Camera3D.PROJECTION_ORTHOGONAL
 	cam.size       = SYS_ORTHO_SIZE
-	cam.rotation.x = SYS_CAM_ROT_X
+	cam.position   = SYS_CAM_POS
+	cam.look_at(Vector3.ZERO, Vector3.UP)
 	_in_planet_view = false
 	_transitioning  = false
 	_ticks_paused   = false
@@ -197,7 +202,7 @@ func _enter_system_view_immediate() -> void:
 	cam.projection = Camera3D.PROJECTION_ORTHOGONAL
 	cam.size       = SYS_ORTHO_SIZE
 	cam.position   = SYS_CAM_POS
-	cam.rotation.x = SYS_CAM_ROT_X
+	cam.look_at(Vector3.ZERO, Vector3.UP)
 	$SystemView.visible   = true
 	$PlanetSphere.visible = false
 	($UI/ZoomInButton as Button).visible = false
