@@ -81,6 +81,11 @@ func _process(delta: float) -> void:
 			_update_orbital_position()
 			if _in_planet_view and tick % update_interval == 0:
 				_update_season_shader()
+	var rot_delta := delta * TAU / (ROTATION_PERIOD * SECS_PER_TICK)
+	($PlanetSphere as MeshInstance3D).rotate_y(rot_delta)
+	($SystemView/OrosProxy as MeshInstance3D).rotate_y(rot_delta)
+	_planet_rotation += rot_delta
+
 	if _in_planet_view:
 		_process_planet_camera(delta)
 	else:
@@ -238,10 +243,6 @@ func _process_system_camera(_delta: float) -> void:
 		_sys_pan_active = false
 
 func _process_planet_camera(delta: float) -> void:
-	var rot_delta := delta * TAU / (ROTATION_PERIOD * SECS_PER_TICK)
-	($PlanetSphere as MeshInstance3D).rotate_y(rot_delta)
-	_planet_rotation += rot_delta
-
 	var speed := 1.2 * delta
 	if Input.is_key_pressed(KEY_A): _yaw   -= speed
 	if Input.is_key_pressed(KEY_D): _yaw   += speed
