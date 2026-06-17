@@ -10,7 +10,8 @@ const ORBIT_CAM_DIST     := 2.5
 const STAR_SCALE_FACTOR  := 1.2
 const SYS_ORTHO_SIZE     := 16.0
 const SYS_CAM_POS        := Vector3(0.0, 18.0, 12.0)
-const SECS_PER_TICK      := 0.1     # real seconds per game day; raise to slow down
+const SECS_PER_TICK      := 10.0    # real seconds per game day; raise to slow down
+const ROTATION_PERIOD    := 1.25    # Oros days per axial rotation
 
 # Star color by kind id: BlueGiant=0 WhiteStar=1 YellowDwarf=2
 #                        OrangeDwarf=3 RedDwarf=4 RedGiant=5 WhiteDwarf=6
@@ -236,6 +237,8 @@ func _process_system_camera(_delta: float) -> void:
 		_sys_pan_active = false
 
 func _process_planet_camera(delta: float) -> void:
+	($PlanetSphere as MeshInstance3D).rotate_y(delta * TAU / (ROTATION_PERIOD * SECS_PER_TICK))
+
 	var speed := 1.2 * delta
 	if Input.is_key_pressed(KEY_A): _yaw   -= speed
 	if Input.is_key_pressed(KEY_D): _yaw   += speed
