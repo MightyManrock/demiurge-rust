@@ -310,6 +310,16 @@ func _setup_oros_proxy() -> void:
 	var proxy       := $SystemView/OrosProxy as MeshInstance3D
 	proxy.scale      = Vector3.ONE * PLANET_PROXY_SCALE
 	proxy.set_surface_override_material(0, annual_mat)
+
+	# Override collision shape in code so editor-set transforms don't double-scale.
+	# Radius is in OrosProxy local space (before the 0.18 node scale) — 1.0 gives
+	# a generous click target without looking wrong visually.
+	var col_shape  := $SystemView/OrosProxy/Area3D/CollisionShape3D as CollisionShape3D
+	var sphere     := SphereShape3D.new()
+	sphere.radius   = 1.0
+	col_shape.shape     = sphere
+	col_shape.transform = Transform3D.IDENTITY
+
 	_update_orbital_position()
 
 func _update_orbital_position() -> void:
