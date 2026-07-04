@@ -94,7 +94,8 @@ fn main() {
         lifespan: Some(common::Range {min: 65, max: 110}),
         temp_range: Some(common::Range { min: 20.0, max: 25.0 }),
         press_range: Some(common::Range { min: 80.0, max: 120.0 }),
-        grav_range: Some(common::Range { min: 0.35, max: 2.25 })
+        grav_range: Some(common::Range { min: 0.35, max: 2.25 }),
+        activity: bio::ActivityPattern::Diurnal,
     };
 
     let species_list_to_write = vec![my_species];

@@ -85,6 +85,8 @@ pub(crate) fn read_db(path: &str) -> Vec<bio::Species> {
             temp_range: serde_json::from_str(&row.get::<_, String>(11)?).unwrap(),
             press_range: serde_json::from_str(&row.get::<_, String>(12)?).unwrap(),
             grav_range: serde_json::from_str(&row.get::<_, String>(13)?).unwrap(),
+            // TODO: no `activity` column yet — persisted species reload as Diurnal.
+            activity: Default::default(),
         })
     }).unwrap()
         .map(|s| s.unwrap())

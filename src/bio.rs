@@ -17,6 +17,16 @@ pub enum SpeciesSentience {
     Sapient,
 }
 
+/// When a species is active, which determines the temperature field its
+/// habitability is scored against: day peak, night trough, or the diurnal mean.
+#[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
+pub enum ActivityPattern {
+    #[default]
+    Diurnal,
+    Nocturnal,
+    Crepuscular,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub enum LifeBasis {
     Carbon,
@@ -121,6 +131,8 @@ pub struct Species {
     pub temp_range: Option<Range<f32>>,
     pub press_range: Option<Range<f32>>,
     pub grav_range: Option<Range<f32>>,
+    #[serde(default)]
+    pub activity: ActivityPattern,
 //  pub visibility: EntityVisibility,   // This will be defined for entities generally.
 //  pinned: bool,
 }

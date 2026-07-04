@@ -4,7 +4,7 @@ use demiurge_rust::universe::{
     LiquidTag, Planet, Star, StarKind,
 };
 use demiurge_rust::bio::{
-    Species, SpeciesKind, SpeciesSentience, AtmosphereAffinity,
+    ActivityPattern, Species, SpeciesKind, SpeciesSentience, AtmosphereAffinity,
     AtmosphereRelationship, FoodTag, LifeBasis, ReproductionKind,
     ReproductionProfile, ReproductiveMethod, ReproductiveRole,
     RespirationMedium, SexKind, Solvent,
@@ -93,6 +93,7 @@ fn main() {
     };
     let is_glacier       = generate_glacier(&temperature, &is_ocean, params.glacier_temp_threshold);
     let aridity          = HeatMap::generate_aridity(&temperature, &precipitation, params.et_factor);
+    let diurnal_swing    = generate_diurnal_swing(&temperature, &aridity, &params);
 
     let temp_img = ImageBuffer::from_fn(width as u32, height as u32, |x, y| {
         let nx = x as f64 / width as f64;
@@ -101,6 +102,31 @@ fn main() {
     });
     temp_img.save("temperature.png").expect("failed to save temperature.png");
     println!("Saved temperature.png");
+
+    // Day/night temperature maps derived from the diurnal swing.
+    for (label, sign) in [("day", 1.0_f64), ("night", -1.0_f64)] {
+        let field_img = ImageBuffer::from_fn(width as u32, height as u32, |x, y| {
+            let i = y as usize * width + x as usize;
+            let t = (temperature.data[i] + sign * diurnal_swing.data[i] / 2.0).clamp(0.0, 1.0);
+            Rgb(temperature_color(t))
+        });
+        let fname = format!("temperature_{}.png", label);
+        field_img.save(&fname).unwrap_or_else(|_| panic!("failed to save {}", fname));
+        println!("Saved {}", fname);
+    }
+
+    // Diurnal swing magnitude (day→night gap), scaled to Celsius for readability.
+    {
+        let max_gap_c = diurnal_swing.data.iter().cloned().fold(0.0_f64, f64::max) * 70.0;
+        let swing_img = ImageBuffer::from_fn(width as u32, height as u32, |x, y| {
+            let i = y as usize * width + x as usize;
+            let gap_c = diurnal_swing.data[i] * 70.0;
+            // Normalize against a 40°C reference for the color ramp.
+            Rgb(temperature_color((gap_c / 40.0).clamp(0.0, 1.0)))
+        });
+        swing_img.save("diurnal_swing.png").expect("failed to save diurnal_swing.png");
+        println!("Saved diurnal_swing.png (peak gap ≈ {:.0}°C)", max_gap_c);
+    }
 
     let precip_img = ImageBuffer::from_fn(width as u32, height as u32, |x, y| {
         let nx = x as f64 / width as f64;
@@ -214,7 +240,7 @@ fn main() {
         params.land_threshold, params.ocean_threshold, params.region_min_size,
     );
     let (region_map, regions) = detect_regions(
-        &elevation, &temperature, &precipitation, &aridity,
+        &elevation, &temperature, &diurnal_swing, &precipitation, &aridity,
         &is_ocean, &is_glacier, &is_sea_ice, &is_salt_flat,
         params.land_threshold, params.ocean_threshold, params.region_min_size,
         params.island_coast_dist, params.island_arch_dist,
@@ -269,6 +295,7 @@ fn main() {
         temp_range: Some(Range { min: 22.0, max: 30.0 }),
         press_range: Some(Range { min: 55.0, max: 105.0 }),
         grav_range: Some(Range { min: 0.50, max: 1.10 }),
+        activity: ActivityPattern::Nocturnal,
     };
 
     let species_list: &[(&str, &Species)] = &[("Keth", &keth)];
@@ -306,6 +333,7 @@ fn main() {
                 precipitation.data[i],
                 aridity.data[i],
                 is_ocean[i],
+                diurnal_swing.data[i],
                 &params,
             )
         }).collect();
@@ -430,6 +458,7 @@ fn main() {
                 .collect(),
         };
         let sea_aridity = HeatMap::generate_aridity(&temperature, &sea_precip, params.et_factor);
+        let sea_swing   = generate_diurnal_swing(&temperature, &sea_aridity, &params);
 
         // Re-run hydrology from seasonal precipitation so river/lake topology
         // reflects the actual flow volume at this time of year.
@@ -468,6 +497,7 @@ fn main() {
                     sea_precip.data[i],
                     sea_aridity.data[i],
                     is_ocean[i],
+                    sea_swing.data[i],
                     &params,
                 )
             }).collect();

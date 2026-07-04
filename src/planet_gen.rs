@@ -3,7 +3,7 @@ use crate::universe::{
     LiquidTag, Planet, Star, StarKind,
 };
 use crate::bio::{
-    AtmosphereAffinity, AtmosphereRelationship, FoodTag, LifeBasis,
+    ActivityPattern, AtmosphereAffinity, AtmosphereRelationship, FoodTag, LifeBasis,
     ReproductionKind, ReproductionProfile, ReproductiveMethod, ReproductiveRole,
     RespirationMedium, SexKind, Solvent, Species, SpeciesKind, SpeciesSentience,
 };
@@ -1062,6 +1062,36 @@ fn westerly_weight(abs_lat: f64, season_offset: f64) -> f64 {
     stops.last().unwrap().1
 }
 
+/// Peak day→night temperature gap, in normalized-temperature units, at full
+/// dryness on a hot, long-rotation cell. ~0.5 norm ≈ 35°C via `normalized_temp_to_celsius`.
+const MAX_DIURNAL_SWING: f64 = 0.55;
+
+/// Diurnal temperature swing field: the day→night gap per cell, in the same
+/// normalized [0,1] units as the temperature field. Derived from the seasonal
+/// temperature snapshot it is paired with, local moisture, and rotation period.
+///
+/// - Hotter cells swing more in absolute terms (`temp`).
+/// - Drier cells swing more — low humidity means no thermal blanket at night.
+/// - Longer planetary days heat and cool for longer, with diminishing returns (`sqrt`).
+///
+/// NOTE: the `aridity` field is inverted relative to its name — a HIGH value is
+/// humid/wet and a LOW value is arid/dry (see `aridity_color`). Dryness, which
+/// drives the swing, is therefore `1 - aridity` (the same moisture inversion the
+/// `solvent_val` term in the scoring functions uses).
+///
+/// `temp_day = mean + swing/2`, `temp_night = mean - swing/2` (both clamped to [0,1]).
+pub fn generate_diurnal_swing(temperature: &HeatMap, aridity: &HeatMap, params: &PlanetParams) -> HeatMap {
+    let rotation_factor = params.rotation_period.sqrt();
+    let data = temperature.data.iter()
+        .zip(&aridity.data)
+        .map(|(&temp, &moisture)| {
+            let dryness = 1.0 - moisture;
+            (MAX_DIURNAL_SWING * temp * dryness * rotation_factor).clamp(0.0, 1.0)
+        })
+        .collect();
+    HeatMap { width: temperature.width, height: temperature.height, data }
+}
+
 /// Returns a bool mask: true where a land cell is glaciated.
 pub fn generate_glacier(temperature: &HeatMap, is_ocean: &[bool], threshold: f64) -> Vec<bool> {
     (0..temperature.data.len())
@@ -1393,6 +1423,7 @@ pub struct Region {
     pub size:              usize,
     pub mean_elev:         f64,
     pub mean_temp:         f64,
+    pub mean_swing:        f64,
     pub mean_precip:       f64,
     pub mean_aridity:      f64,
     pub ocean_frac:        f64,
@@ -1403,6 +1434,16 @@ pub struct Region {
 }
 
 impl Region {
+    /// Region-average daytime temperature (normalized), = mean + swing/2.
+    pub fn mean_temp_day(&self) -> f64 {
+        effective_temp(self.mean_temp, self.mean_swing, &ActivityPattern::Diurnal)
+    }
+
+    /// Region-average nighttime temperature (normalized), = mean − swing/2.
+    pub fn mean_temp_night(&self) -> f64 {
+        effective_temp(self.mean_temp, self.mean_swing, &ActivityPattern::Nocturnal)
+    }
+
     pub fn temp_zone(&self) -> &'static str {
         if self.mean_temp < 0.20 { "Polar" }
         else if self.mean_temp < 0.35 { "Cold" }
@@ -1487,6 +1528,7 @@ fn cell_kind(idx: usize, is_ocean: &[bool], is_glacier: &[bool], is_sea_ice: &[b
 pub fn detect_regions(
     elevation:       &HeatMap,
     temperature:     &HeatMap,
+    diurnal_swing:   &HeatMap,
     precipitation:   &HeatMap,
     aridity:         &HeatMap,
     is_ocean:        &[bool],
@@ -1745,6 +1787,7 @@ pub fn detect_regions(
                 size:              cells.len(),
                 mean_elev:         cells.iter().map(|&i| elevation.data[i]).sum::<f64>()     / sf,
                 mean_temp:         cells.iter().map(|&i| temperature.data[i]).sum::<f64>()   / sf,
+                mean_swing:        cells.iter().map(|&i| diurnal_swing.data[i]).sum::<f64>() / sf,
                 mean_precip:       cells.iter().map(|&i| precipitation.data[i]).sum::<f64>() / sf,
                 mean_aridity:      cells.iter().map(|&i| aridity.data[i]).sum::<f64>()       / sf,
                 ocean_frac:        cells.iter().filter(|&&i| is_ocean[i]).count()     as f64 / sf,
@@ -1829,6 +1872,17 @@ fn normalized_temp_to_celsius(t: f64) -> f64 {
     t * 70.0 - 15.0
 }
 
+/// The temperature a species actually experiences given its activity pattern:
+/// the day peak, the night trough, or the diurnal mean. `mean` and `swing` are
+/// in normalized temperature units; the result is clamped to [0, 1].
+fn effective_temp(mean: f64, swing: f64, activity: &ActivityPattern) -> f64 {
+    match activity {
+        ActivityPattern::Diurnal     => (mean + swing / 2.0).clamp(0.0, 1.0),
+        ActivityPattern::Nocturnal   => (mean - swing / 2.0).clamp(0.0, 1.0),
+        ActivityPattern::Crepuscular => mean,
+    }
+}
+
 /// Scores how well `value` fits within `range`: 1.0 inside, linear decay outside,
 /// reaching 0 at a distance of one range-width beyond either boundary.
 fn range_score(value: f64, range: &Range<f32>) -> f64 {
@@ -1897,8 +1951,10 @@ pub fn score_region_for_species(species: &Species, region: &Region, params: &Pla
         None => 1.0,
     };
 
-    // Temperature converted to Celsius.
-    let temp_c = normalized_temp_to_celsius(region.mean_temp);
+    // Temperature converted to Celsius, against the field the species is active in.
+    let temp_c = normalized_temp_to_celsius(
+        effective_temp(region.mean_temp, region.mean_swing, &species.activity),
+    );
     let temp = match &species.temp_range {
         Some(r) => range_score(temp_c, r),
         None => 1.0,
@@ -1927,6 +1983,7 @@ pub fn score_cell_for_species(
     precip: f64,
     aridity: f64,
     is_ocean_cell: bool,
+    swing: f64,
     params: &PlanetParams,
 ) -> f64 {
     let atmo = atmo_score(&species.atmo_aff, &params.atmo);
@@ -1946,7 +2003,7 @@ pub fn score_cell_for_species(
         None => 1.0,
     };
 
-    let temp_c = normalized_temp_to_celsius(temp);
+    let temp_c = normalized_temp_to_celsius(effective_temp(temp, swing, &species.activity));
     let temp_s = match &species.temp_range {
         Some(r) => range_score(temp_c, r),
         None => 1.0,
@@ -2304,4 +2361,176 @@ pub fn render_ice_layer(
             Rgba([0, 0, 0, 0])
         }
     })
+}
+
+/// Renders an opaque, full-coverage temperature map from a normalized
+/// temperature field (mean, day, or night). Every cell is colored through
+/// `temperature_color` with Bayer dithering — used for the day/night temperature
+/// layers in the planet view. Unlike the hydrology/ice overlays this covers the
+/// whole globe, so it is returned opaque rather than as a transparent overlay.
+pub fn render_temp_field_layer(
+    _width: usize, _height: usize,
+    render_width: usize, render_height: usize,
+    field: &HeatMap,
+) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
+    const N_DITHER_LEVELS: usize = 16;
+
+    ImageBuffer::from_fn(render_width as u32, render_height as u32, |rx, ry| {
+        let nx = rx as f64 / render_width as f64;
+        let ny = ry as f64 / render_height as f64;
+        let t = field.sample_nearest(nx, ny);
+        let d = bayer_dither(t, rx as usize, ry as usize, N_DITHER_LEVELS);
+        let [r, g, b] = temperature_color(d);
+        Rgba([r, g, b, 255])
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn uniform(width: usize, height: usize, value: f64) -> HeatMap {
+        HeatMap { width, height, data: vec![value; width * height] }
+    }
+
+    // NOTE: the "aridity" field is inverted vs its name — HIGH = humid/wet,
+    // LOW = arid/dry (see aridity_color: 0.0 = hyperarid, 1.0 = very humid).
+    // A hot *desert* cell therefore has a LOW aridity-field value.
+
+    #[test]
+    fn swing_is_zero_when_fully_wet() {
+        let params = PlanetParams::oros();
+        let temp = uniform(4, 4, 0.8);   // hot
+        let arid = uniform(4, 4, 1.0);   // fully humid → thermal blanket → no swing
+        let swing = generate_diurnal_swing(&temp, &arid, &params);
+        assert!(swing.data.iter().all(|&s| s == 0.0));
+    }
+
+    #[test]
+    fn swing_is_zero_when_freezing() {
+        let params = PlanetParams::oros();
+        let temp = uniform(4, 4, 0.0);   // coldest → no thermal energy to shed
+        let arid = uniform(4, 4, 0.1);   // dry
+        let swing = generate_diurnal_swing(&temp, &arid, &params);
+        assert!(swing.data.iter().all(|&s| s == 0.0));
+    }
+
+    #[test]
+    fn dry_cell_swings_more_than_humid_cell() {
+        let params = PlanetParams::oros();
+        let temp = uniform(1, 1, 0.7);
+        let dry   = generate_diurnal_swing(&temp, &uniform(1, 1, 0.1), &params);
+        let humid = generate_diurnal_swing(&temp, &uniform(1, 1, 0.9), &params);
+        assert!(dry.data[0] > humid.data[0], "dry {} should swing more than humid {}", dry.data[0], humid.data[0]);
+    }
+
+    #[test]
+    fn night_below_mean_below_day() {
+        let params = PlanetParams::oros();
+        let temp = uniform(4, 4, 0.6);
+        let arid = uniform(4, 4, 0.7);
+        let swing = generate_diurnal_swing(&temp, &arid, &params);
+        for (&mean, &s) in temp.data.iter().zip(&swing.data) {
+            let day = (mean + s / 2.0).clamp(0.0, 1.0);
+            let night = (mean - s / 2.0).clamp(0.0, 1.0);
+            assert!(night <= mean && mean <= day, "night {night} mean {mean} day {day}");
+        }
+    }
+
+    #[test]
+    fn day_night_stay_clamped_at_extremes() {
+        let params = PlanetParams::oros();
+        // Near-max mean with a large swing must not push day above 1.0.
+        let temp = uniform(2, 2, 0.98);
+        let arid = uniform(2, 2, 0.0);   // fully arid → maximum swing
+        let swing = generate_diurnal_swing(&temp, &arid, &params);
+        for (&mean, &s) in temp.data.iter().zip(&swing.data) {
+            let day = (mean + s / 2.0).clamp(0.0, 1.0);
+            let night = (mean - s / 2.0).clamp(0.0, 1.0);
+            assert!((0.0..=1.0).contains(&day) && (0.0..=1.0).contains(&night));
+        }
+    }
+
+    #[test]
+    fn hot_dry_oros_cell_swings_like_a_desert() {
+        let params = PlanetParams::oros();
+        let temp = uniform(1, 1, 0.8);   // hot
+        let arid = uniform(1, 1, 0.1);   // very dry (low humidity field value)
+        let swing = generate_diurnal_swing(&temp, &arid, &params);
+        // Full day→night gap in Celsius = swing (normalized) * 70.
+        let gap_c = swing.data[0] * 70.0;
+        assert!((28.0..=36.0).contains(&gap_c), "gap was {gap_c} C");
+    }
+
+    /// Minimal species with an atmosphere-agnostic profile: only temperature is
+    /// scored (every other axis defaults to a perfect 1.0).
+    fn temp_only_species(range: crate::common::Range<f32>, activity: crate::bio::ActivityPattern) -> Species {
+        Species {
+            id: Uuid::nil(),
+            name: None,
+            kind: SpeciesKind::Generic,
+            origin_world_id: Uuid::nil(),
+            sentience: None,
+            basis: LifeBasis::Carbon,
+            solvent: Solvent { liquid: LiquidTag::Water, access_range: None, humidity_range: None },
+            atmo_aff: vec![],
+            food_tag: vec![],
+            repro_profile: ReproductionProfile { sex_kinds: vec![], repro_kind: vec![], repro_method: None },
+            lifespan: None,
+            temp_range: Some(range),
+            press_range: None,
+            grav_range: None,
+            activity,
+        }
+    }
+
+    #[test]
+    fn nocturnal_and_diurnal_score_differ_on_high_swing_cell() {
+        use crate::bio::ActivityPattern;
+        let params = PlanetParams::oros();
+        let range = crate::common::Range { min: 15.0, max: 25.0 };
+        let nocturnal = temp_only_species(range.clone(), ActivityPattern::Nocturnal);
+        let diurnal   = temp_only_species(range, ActivityPattern::Diurnal);
+
+        // mean norm 0.6 ≈ 27°C (just above range); swing 0.2 → night 20°C (in range), day 34°C (out).
+        let (mean, swing) = (0.6, 0.2);
+        let n = score_cell_for_species(&nocturnal, 0.5, mean, 0.5, 0.5, false, swing, &params);
+        let d = score_cell_for_species(&diurnal,   0.5, mean, 0.5, 0.5, false, swing, &params);
+        assert!(n > d, "nocturnal {n} should out-score diurnal {d} on a high-swing cell");
+    }
+
+    #[test]
+    fn nocturnal_and_diurnal_score_equal_on_zero_swing_cell() {
+        use crate::bio::ActivityPattern;
+        let params = PlanetParams::oros();
+        let range = crate::common::Range { min: 15.0, max: 25.0 };
+        let nocturnal = temp_only_species(range.clone(), ActivityPattern::Nocturnal);
+        let diurnal   = temp_only_species(range, ActivityPattern::Diurnal);
+
+        let (mean, swing) = (0.6, 0.0);
+        let n = score_cell_for_species(&nocturnal, 0.5, mean, 0.5, 0.5, false, swing, &params);
+        let d = score_cell_for_species(&diurnal,   0.5, mean, 0.5, 0.5, false, swing, &params);
+        assert_eq!(n, d, "with no swing, activity pattern must not change the score");
+    }
+
+    #[test]
+    fn region_scoring_uses_activity_swing() {
+        use crate::bio::ActivityPattern;
+        let params = PlanetParams::oros();
+        let range = crate::common::Range { min: 15.0, max: 25.0 };
+        let nocturnal = temp_only_species(range.clone(), ActivityPattern::Nocturnal);
+        let diurnal   = temp_only_species(range, ActivityPattern::Diurnal);
+
+        // Land region, mean 0.6 ≈ 27°C; swing 0.2 → night 20°C (in range), day 34°C (out).
+        let region = Region {
+            id: 0, size: 100,
+            mean_elev: 0.5, mean_temp: 0.6, mean_swing: 0.2,
+            mean_precip: 0.3, mean_aridity: 0.3,
+            ocean_frac: 0.0, glacier_frac: 0.0, sea_ice_frac: 0.0, salt_flat_frac: 0.0,
+            island_components: 0,
+        };
+        let n = score_region_for_species(&nocturnal, &region, &params);
+        let d = score_region_for_species(&diurnal, &region, &params);
+        assert!(n > d, "nocturnal {n} should out-score diurnal {d} on a high-swing region");
+    }
 }

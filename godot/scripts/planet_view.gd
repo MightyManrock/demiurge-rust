@@ -33,8 +33,15 @@ var update_interval: int
 var terrain_tex: ImageTexture
 var hydro_texs: Array[ImageTexture] = []
 var ice_texs:   Array[ImageTexture] = []
+var temp_day_texs:   Array[ImageTexture] = []
+var temp_night_texs: Array[ImageTexture] = []
 var shader_mat: ShaderMaterial
 var annual_mat: StandardMaterial3D
+var temp_mat:   StandardMaterial3D
+
+# Planet surface layer: 0 = Normal, 1 = Day temperature, 2 = Night temperature.
+# Cycled with the L key while in planet view.
+var _planet_layer: int = 0
 
 # --- Mode state --------------------------------------------------------------
 var _in_planet_view: bool = false
@@ -123,6 +130,11 @@ func _unhandled_input(event: InputEvent) -> void:
 				_orbit_radius = clamp(_orbit_radius - 0.2, 1.3, 6.0)
 			elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 				_orbit_radius = clamp(_orbit_radius + 0.2, 1.3, 6.0)
+		elif event is InputEventKey and event.pressed and not event.echo:
+			# L cycles the surface layer: Normal → Day temp → Night temp.
+			if event.keycode == KEY_L:
+				_planet_layer = (_planet_layer + 1) % 3
+				_apply_planet_layer()
 
 # --- Signal handlers ---------------------------------------------------------
 
@@ -191,6 +203,7 @@ func _mid_zoom_in(_oros_pos: Vector3) -> void:
 	$PlanetSphere.visible           = true
 
 func _finish_zoom_in() -> void:
+	_planet_layer = 0
 	($PlanetSphere as MeshInstance3D).set_surface_override_material(0, shader_mat)
 	_in_planet_view = true
 	_transitioning  = false
@@ -358,6 +371,8 @@ func _build_textures() -> void:
 	for i in range(4):
 		hydro_texs.append(_make_tex(renderer.hydrology_texture(i), true))
 		ice_texs.append(_make_tex(renderer.ice_texture(i), true))
+		temp_day_texs.append(_make_tex(renderer.temp_day_texture(i), true))
+		temp_night_texs.append(_make_tex(renderer.temp_night_texture(i), true))
 
 func _build_materials() -> void:
 	var planet_shader := load("res://shaders/planet.gdshader") as Shader
@@ -373,6 +388,10 @@ func _build_materials() -> void:
 	annual_mat                = StandardMaterial3D.new()
 	annual_mat.albedo_texture = _make_tex(renderer.annual_texture(), false)
 
+	# Unshaded material reused for the day/night temperature data layers.
+	temp_mat              = StandardMaterial3D.new()
+	temp_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+
 func _update_season_shader() -> void:
 	var season_phase := float(tick % ORBITAL_PERIOD) / float(ORBITAL_PERIOD)
 	var snapshot_f   := season_phase * 4.0
@@ -384,6 +403,30 @@ func _update_season_shader() -> void:
 	shader_mat.set_shader_parameter("ice_a",   ice_texs[snap_a])
 	shader_mat.set_shader_parameter("ice_b",   ice_texs[snap_b])
 	shader_mat.set_shader_parameter("blend",   blend_val)
+	# Keep an active temperature data layer in sync with the season.
+	if _planet_layer != 0:
+		_apply_planet_layer()
+
+func _current_snapshot() -> int:
+	var season_phase := float(tick % ORBITAL_PERIOD) / float(ORBITAL_PERIOD)
+	return int(season_phase * 4.0) % 4
+
+# Applies the current planet surface layer to PlanetSphere. Normal uses the
+# season-blended terrain shader; the temperature layers show the day/night
+# field for the current seasonal snapshot on the reusable unshaded material.
+func _apply_planet_layer() -> void:
+	if not _in_planet_view:
+		return
+	var sphere := $PlanetSphere as MeshInstance3D
+	match _planet_layer:
+		1:
+			temp_mat.albedo_texture = temp_day_texs[_current_snapshot()]
+			sphere.set_surface_override_material(0, temp_mat)
+		2:
+			temp_mat.albedo_texture = temp_night_texs[_current_snapshot()]
+			sphere.set_surface_override_material(0, temp_mat)
+		_:
+			sphere.set_surface_override_material(0, shader_mat)
 
 func _make_tex(bytes: PackedByteArray, rgba: bool) -> ImageTexture:
 	var fmt := Image.FORMAT_RGBA8 if rgba else Image.FORMAT_RGB8

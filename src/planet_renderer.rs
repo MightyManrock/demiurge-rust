@@ -5,6 +5,7 @@ use crate::planet_gen::{
     generate_sea_ice, generate_glacier, flood_fill_ocean,
     compute_salt_flat_dist, render_composite_map, sample_precip_phasor,
     render_terrain_layer, render_hydrology_layer, render_ice_layer,
+    generate_diurnal_swing, render_temp_field_layer,
 };
 use std::f64::consts::PI;
 
@@ -26,6 +27,7 @@ pub struct PlanetMapRenderer {
 
     // Seasonal snapshots (4 per layer)
     seasonal_temps:      Vec<HeatMap>,
+    seasonal_swing:      Vec<HeatMap>,
     seasonal_hydro_maps: Vec<HeatMap>,
     seasonal_glacier:    Vec<Vec<bool>>,
     seasonal_sea_ice:    Vec<Vec<bool>>,
@@ -41,6 +43,7 @@ impl INode for PlanetMapRenderer {
             is_ocean: None, is_salt_flat: None, salt_flat_dist: None,
             annual_hydro: None,
             seasonal_temps: Vec::new(),
+            seasonal_swing: Vec::new(),
             seasonal_hydro_maps: Vec::new(),
             seasonal_glacier: Vec::new(),
             seasonal_sea_ice: Vec::new(),
@@ -85,12 +88,14 @@ impl PlanetMapRenderer {
 
         // Build 4 seasonal snapshots
         let mut seasonal_temps      = Vec::with_capacity(4);
+        let mut seasonal_swing      = Vec::with_capacity(4);
         let mut seasonal_hydro_maps = Vec::with_capacity(4);
         let mut seasonal_glacier    = Vec::with_capacity(4);
         let mut seasonal_sea_ice    = Vec::with_capacity(4);
 
         for &phase in &SEASON_PHASES {
             let s_temp    = HeatMap::generate_temperature(&elevation, &params, phase);
+            let s_swing   = generate_diurnal_swing(&s_temp, &aridity, &params);
             let s_glacier = generate_glacier(&s_temp, &is_ocean, params.glacier_temp_threshold);
             let s_sea_ice = generate_sea_ice(&s_temp, &is_ocean, params.sea_ice_temp_threshold);
 
@@ -104,6 +109,7 @@ impl PlanetMapRenderer {
             );
 
             seasonal_temps.push(s_temp);
+            seasonal_swing.push(s_swing);
             seasonal_hydro_maps.push(s_hydro.map);
             seasonal_glacier.push(s_glacier);
             seasonal_sea_ice.push(s_sea_ice);
@@ -117,6 +123,7 @@ impl PlanetMapRenderer {
         self.is_salt_flat        = Some(is_salt_flat);
         self.salt_flat_dist      = Some(salt_flat_dist);
         self.seasonal_temps      = seasonal_temps;
+        self.seasonal_swing      = seasonal_swing;
         self.seasonal_hydro_maps = seasonal_hydro_maps;
         self.seasonal_glacier    = seasonal_glacier;
         self.seasonal_sea_ice    = seasonal_sea_ice;
@@ -163,6 +170,18 @@ impl PlanetMapRenderer {
         PackedByteArray::from(img.into_raw().as_slice())
     }
 
+    /// Daytime temperature map (mean + swing/2) for a seasonal snapshot.
+    #[func]
+    pub fn temp_day_texture(&self, snapshot: i32) -> PackedByteArray {
+        self.temp_field_texture(snapshot, 1.0)
+    }
+
+    /// Nighttime temperature map (mean − swing/2) for a seasonal snapshot.
+    #[func]
+    pub fn temp_night_texture(&self, snapshot: i32) -> PackedByteArray {
+        self.temp_field_texture(snapshot, -1.0)
+    }
+
     #[func]
     pub fn annual_texture(&self) -> PackedByteArray {
         let p   = self.params.as_ref().expect("call initialize() first");
@@ -201,5 +220,22 @@ impl PlanetMapRenderer {
     #[func]
     pub fn star_radius(&self) -> f64 {
         1.05
+    }
+}
+
+impl PlanetMapRenderer {
+    /// Builds a day (`sign = 1.0`) or night (`sign = -1.0`) temperature field for
+    /// the given snapshot — `mean + sign * swing/2`, clamped — and renders it.
+    fn temp_field_texture(&self, snapshot: i32, sign: f64) -> PackedByteArray {
+        let idx   = snapshot.clamp(0, 3) as usize;
+        let temp  = &self.seasonal_temps[idx];
+        let swing = &self.seasonal_swing[idx];
+        let data  = temp.data.iter()
+            .zip(&swing.data)
+            .map(|(&m, &s)| (m + sign * s / 2.0).clamp(0.0, 1.0))
+            .collect();
+        let field = HeatMap { width: temp.width, height: temp.height, data };
+        let img = render_temp_field_layer(WIDTH, HEIGHT, WIDTH * 3, HEIGHT * 3, &field);
+        PackedByteArray::from(img.into_raw().as_slice())
     }
 }
